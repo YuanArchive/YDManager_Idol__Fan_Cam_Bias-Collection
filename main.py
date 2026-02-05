@@ -935,7 +935,7 @@ class VideoSorter(QMainWindow):
         )
         
         # ThemeMessageBox 사용 (ui_components에서 import 필요)
-        from ui_components import ThemeMessageBox
+        from src.ui.ui_components import ThemeMessageBox
         reply = ThemeMessageBox.question(
             self, "하이라이트 전체 초기화", msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -964,8 +964,15 @@ class VideoSorter(QMainWindow):
                 
                 # 다른 플레이어 숨김 및 완전 정지
                 idle_indices = self.player_manager.get_idle_players()
+                current_source = active_data['player'].source().toLocalFile()
                 for idx in idle_indices:
                     p_data = self.player_manager.get_player_by_index(idx)
+                    # [Fix] 현재 재생 중인 파일과 동일한 경로면 해제하지 않음
+                    if p_data['path'] and current_source and os.path.normpath(p_data['path']) == os.path.normpath(current_source):
+                        continue
+                    # [Fix] 로딩 중인 플레이어는 건드리지 않음 (프리로드 보호)
+                    if p_data['player'].mediaStatus() == QMediaPlayer.MediaStatus.LoadingMedia:
+                        continue
                     p_data['item'].setOpacity(0.0)
                     p_data['item'].setZValue(0.0)
                     p_data['player'].stop()
@@ -1258,35 +1265,62 @@ class VideoSorter(QMainWindow):
         path = item_widget.data(Qt.ItemDataRole.UserRole)
         if not path: return
 
+        # [Fix] 현재 모드에 맞는 파일 리스트 사용
+        current_list = self.file_manager.get_current_list()
         real_index = -1
-        # main_files에서 실제 인덱스 찾기
-        for i, item in enumerate(self.file_manager.main_files):
+        for i, item in enumerate(current_list):
             if os.path.normpath(item['path']) == os.path.normpath(path):
                 real_index = i; break
         
         if real_index == -1: return
-        current_item = self.file_manager.main_files[real_index]
+        current_item = current_list[real_index]
         old_basename = os.path.basename(current_item['path'])
         
         # 파일명에서 # 추가 또는 제거 결정
         new_basename = old_basename[1:] if old_basename.startswith("#") else "#" + old_basename 
         current_pos = self.player.position()
         
-        # [중요] 파일 이름 변경 전 핸들 해제
-        if hasattr(self, 'player_manager'):
-            self.player_manager.stop_and_release_path(path)
+        # [Fix] 현재 활성 플레이어의 인덱스 저장 (같은 플레이어 재사용)
+        active_idx = self.player_manager.active_indices[self.player_manager.current_mode]
+        active_data = self.player_manager.get_active_player()
         
-        success, msg = self.file_manager.rename_file_by_path(current_item['path'], new_basename)
-    
-        if success: 
-            item_widget.setText(msg) 
-            new_path = self.file_manager.main_files[real_index]['path']
-            item_widget.setData(Qt.ItemDataRole.UserRole, new_path)
-            
-            # 위치 지정 재생 (Seek 로직 건너뜀)
-            self.play_video(row, current_pos) 
-            pass
-        else: ThemeMessageBox.warning(self, "오류", msg)
+        # [중요] 파일 이름 변경 전 핸들 해제
+        if active_data:
+            active_data['player'].stop()
+            active_data['player'].setSource(QUrl())
+            active_data['path'] = None
+        
+        # [Fix] 이벤트 루프 강제 처리하여 Qt가 파일 핸들을 즉시 해제하도록 함
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+        
+        # [Fix] 핸들 해제 후 딜레이를 주고 rename 실행 (파일 잠금 해제 대기)
+        def _do_rename_and_play():
+            success, msg = self.file_manager.rename_file_by_path(current_item['path'], new_basename)
+            if success: 
+                item_widget.setText(msg) 
+                new_path = current_list[real_index]['path']
+                item_widget.setData(Qt.ItemDataRole.UserRole, new_path)
+                
+                # [Fix] 같은 플레이어에 직접 새 소스 설정 (active_index 유지)
+                self.player_manager.active_indices[self.player_manager.current_mode] = active_idx
+                active_data['path'] = new_path
+                active_data['player'].setSource(QUrl.fromLocalFile(new_path))
+                active_data['item'].setOpacity(1.0)
+                active_data['item'].setZValue(10.0)
+                
+                # 위치 복원 및 재생
+                def _seek_and_play():
+                    if current_pos > 0:
+                        active_data['player'].setPosition(current_pos)
+                    if self.conf_auto_play:
+                        active_data['player'].play()
+                    active_data['audio'].setMuted(not self.chk_audio.isChecked())
+                QTimer.singleShot(50, _seek_and_play)
+            else: 
+                ThemeMessageBox.warning(self, "오류", msg)
+        
+        QTimer.singleShot(100, _do_rename_and_play)
 
     def save_current_highlight(self):
         current_row = self.file_list.currentRow()
