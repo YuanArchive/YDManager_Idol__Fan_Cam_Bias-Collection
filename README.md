@@ -11,7 +11,7 @@
 <!-- 🏷️ BADGES -->
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/)
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://github.com/)
-[![Version](https://img.shields.io/badge/Version-8.2-88C0D0?style=for-the-badge)](https://github.com/)
+[![Version](https://img.shields.io/badge/Version-1.0.0-88C0D0?style=for-the-badge)](https://github.com/)
 [![License](https://img.shields.io/badge/License-MIT-A3BE8C?style=for-the-badge)](./LICENSE)
 
 <br/>
@@ -39,7 +39,7 @@
 
 ### 📥 지금 바로 다운로드
 
-[![Download](https://img.shields.io/badge/Download-YDManager_v8.2.exe-88C0D0?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/YuanArchive/YDManager/releases/latest)
+[![Download](https://img.shields.io/badge/Download-YDManager_v1.0.0.exe-88C0D0?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/YuanArchive/YDManager/releases/latest)
 
 **↑ 클릭 한 번으로 설치 끝!**
 
