@@ -107,7 +107,9 @@ def load_fonts():
         return True
 
     # 2. 번들된게 없으면 기존 로직(다운로드/로컬복사) 수행
-    font_dir = os.path.join(os.getcwd(), "assets", "fonts")
+    # [수정] Program Files 권한 문제 방지: AppData에 폰트 저장
+    app_data = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
+    font_dir = os.path.join(app_data, 'YDManager', 'fonts')
     if not os.path.exists(font_dir):
         os.makedirs(font_dir)
     

@@ -17,7 +17,7 @@
 <br/>
 
 <!-- 📌 QUOTE -->
-> **"그녀들의 모든 순간을, 가장 완벽하게 소장하다."**
+> **"그분들의 모든 순간을, 가장 완벽하게 소장하다."**
 
 </div>
 
@@ -26,8 +26,9 @@
 ## 💫 About
 
 **YDManager**는 단순한 파일 관리자가 아닙니다.  
-수많은 **아이돌 직캠**과 소중한 영상을 가장 아름답고 체계적으로 관리하기 위해 탄생한  
-**Fancam Collection Orchestrator**입니다.
+수많은 **아이돌 직캠**과 **그녀들의 영상**을 
+가장 아름답고 체계적으로 관리하기 위해 탄생한  
+**동영상 관리 도구** 입니다.
 
 <br/>
 
@@ -39,7 +40,7 @@
 
 ### 📥 지금 바로 다운로드
 
-[![Download](https://img.shields.io/badge/Download-YDManager_v1.0.0.exe-88C0D0?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/YuanArchive/YDManager/releases/latest)
+[![Download](https://img.shields.io/badge/Download-YDManager_v1.0.0.exe-88C0D0?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/YuanArchive/YDManager_Idol__Fan_Cam_Bias-Collection/releases/latest)
 
 **↑ 클릭 한 번으로 설치 끝!**
 
@@ -54,7 +55,7 @@
 
 ```bash
 # 1. 저장소 복제
-git clone https://github.com/YuanArchive/YDManager.git
+git clone https://github.com/YuanArchive/YDManager_Idol__Fan_Cam_Bias-Collection.git
 cd YDManager
 
 # 2. 의존성 설치

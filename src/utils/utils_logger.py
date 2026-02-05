@@ -4,8 +4,14 @@ import sys
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 
-# 로그 저장 폴더
-LOG_DIR = os.path.join(os.getcwd(), "logs")
+# 로그 저장 폴더 (Program Files 권한 문제 방지를 위해 AppData 사용)
+def _get_log_dir():
+    """로그 디렉토리 경로를 반환합니다. PyInstaller 환경도 지원."""
+    # 사용자 AppData 폴더에 로그 저장 (권한 문제 방지)
+    app_data = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
+    return os.path.join(app_data, 'YDManager', 'logs')
+
+LOG_DIR = _get_log_dir()
 
 # 프라이버시 모드 플래그
 _PRIVACY_MODE = False

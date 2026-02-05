@@ -17,7 +17,9 @@ YDManager.spec
 # --- Build Artifacts ---
 build/
 dist/
+installer/
 tests/
+setup.iss
 
 # --- Python 시스템 파일 (기본) ---
 __pycache__/
