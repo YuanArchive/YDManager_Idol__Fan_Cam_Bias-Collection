@@ -1,0 +1,31 @@
+# --- Project Kinetix : 불필요한 토큰 낭비 방지 ---
+poetry.lock        # (사용자 요청) 토큰 낭비 주범 1순위
+snapshots/         # 스크린샷 및 상태 덤프 (바이너리라 읽을 필요 없음)
+debug/             # OCR/이미지 인식 과정의 임시 이미지들
+logs/              # 실행 로그 텍스트 (에러 났을 때만 직접 복사해주면 됨)
+final_check_*/     # 백업 폴더 (중복 코드 방지)
+
+# --- Synapse & AI Agent Data (로컬 전용) ---
+.synapse/
+.context/
+.antigravity/
+index/
+*.log
+
+# --- Build Artifacts ---
+build/
+dist/
+
+# --- Python 시스템 파일 (기본) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.vscode/
+.idea/
+.env
+full_project_code.txt
+all_file.py
+
+# ⚠️ 주의: .agent/ 폴더는 AI가 프로젝트 구조와 코딩 규칙을
+# 파악하는 데 필수적이므로 절대 무시하지 않습니다!
+.vibe/
