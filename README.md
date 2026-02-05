@@ -26,14 +26,51 @@
 ## 💫 About
 
 **YDManager**는 단순한 파일 관리자가 아닙니다.  
-수많은 **아이돌 직캠(Fancam)**과 소중한 영상을 가장 아름답고 체계적으로 관리하기 위해 탄생한  
+수많은 **아이돌 직캠**과 소중한 영상을 가장 아름답고 체계적으로 관리하기 위해 탄생한  
 **Fancam Collection Orchestrator**입니다.
 
 <br/>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 
-## 📸 Preview
+## � Installation
+
+<div align="center">
+
+### 📥 지금 바로 다운로드
+
+[![Download](https://img.shields.io/badge/Download-YDManager_v8.2.exe-88C0D0?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/YuanArchive/YDManager/releases/latest)
+
+**↑ 클릭 한 번으로 설치 끝!**
+
+</div>
+
+<br/>
+
+<details>
+<summary>🛠️ <b>개발자용: 소스에서 실행하기</b></summary>
+
+<br/>
+
+```bash
+# 1. 저장소 복제
+git clone https://github.com/YuanArchive/YDManager.git
+cd YDManager
+
+# 2. 의존성 설치
+pip install -r requirements.txt
+
+# 3. 실행
+python main.py
+```
+
+</details>
+
+<br/>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+## �📸 Preview
 
 <div align="center">
 
@@ -94,7 +131,7 @@ Windows **Blur/Acrylic** 효과로 오직 영상에만 집중할 수 있는 환�
 | Feature | Description |
 | :---: | :--- |
 | 🏷️ **Rank Filters** | 영상을 **A급/B급**으로 분류하고 태그별로 모아보기 |
-| ⏩ **Auto-Skip** | 지루한 구간은 자동으로 건너뛰는 **Smart Seek** |
+| ⏩ **Auto-Skip** | 빠른 탐색을 위한 **Smart Seek** 시스템 |
 | 🗑️ **Safe Trash** | 자체 **휴지통 & 복구 시스템** 탑재 |
 | 👁️ **16:9 Optimized** | 영상 감상에 최적화된 비율 강제 모드 |
 | 🔁 **Background Indexing** | 수천 개 파일도 끊김 없이 로딩 |
@@ -133,44 +170,7 @@ Windows **Blur/Acrylic** 효과로 오직 영상에만 집중할 수 있는 환�
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 
-## 🔧 Installation
-
-<div align="center">
-
-### � 지금 바로 다운로드
-
-[![Download](https://img.shields.io/badge/Download-YDManager_v8.2.exe-88C0D0?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/YourUsername/YDManager/releases/latest)
-
-**↑ 클릭 한 번으로 설치 끝! Python 설치 없이 바로 실행 가능합니다.**
-
-</div>
-
-<br/>
-
-<details>
-<summary>🛠️ <b>개발자용: 소스에서 실행하기</b></summary>
-
-<br/>
-
-```bash
-# 1. 저장소 복제
-git clone https://github.com/YourUsername/YDManager.git
-cd YDManager
-
-# 2. 의존성 설치
-pip install -r requirements.txt
-
-# 3. 실행
-python main.py
-```
-
-</details>
-
-<br/>
-
-<!-- ═══════════════════════════════════════════════════════════════════════════ -->
-
-## 🕹️ Keyboard Shortcuts
+## ️ Keyboard Shortcuts
 
 <details open>
 <summary><b>🎮 기본 조작 (Playback)</b></summary>
