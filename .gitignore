@@ -11,10 +11,13 @@ final_check_*/     # 백업 폴더 (중복 코드 방지)
 .antigravity/
 index/
 *.log
+BUILD.md
+YDManager.spec
 
 # --- Build Artifacts ---
 build/
 dist/
+tests/
 
 # --- Python 시스템 파일 (기본) ---
 __pycache__/
@@ -26,6 +29,5 @@ __pycache__/
 full_project_code.txt
 all_file.py
 
-# ⚠️ 주의: .agent/ 폴더는 AI가 프로젝트 구조와 코딩 규칙을
-# 파악하는 데 필수적이므로 절대 무시하지 않습니다!
+.agent/
 .vibe/
