@@ -36,6 +36,7 @@ from src.managers.player_manager import PlayerManager
 from src.core.event_handler import ShortcutHandler, GlobalAppFilter
 from src.core.signal_setup import setup_app_connections
 from src.ui.ui_components import ThemeMessageBox, ProVideoView
+from src.controllers.file_action_controller import FileActionController
 from src.utils.utils_logger import get_logger, set_log_privacy_mode
 
 
@@ -128,6 +129,9 @@ class VideoSorter(QMainWindow):
         QTimer.singleShot(0, self.apply_16_9_ratio)
         
         self.player_manager = PlayerManager(self.video_view, self.chk_audio)
+        
+        # [리팩토링] 파일 액션 컨트롤러 초기화
+        self.file_action = FileActionController(self)
         
         # 시그널 연결 및 초기 상태 설정
         self.connect_signals()   
@@ -908,43 +912,12 @@ class VideoSorter(QMainWindow):
                 active_data['item'].setOpacity(1.0)
                 
     def on_clear_all_tags(self, tag_type: str) -> None:
-        msg = (
-            f"모든 {tag_type}급 태그 기록을 삭제하시겠습니까?\n\n"
-            "※목록에서만 제외되며, 실제 영상 파일은 삭제되지 않습니다."
-        )
-        # ThemeMessageBox 사용
-        reply = ThemeMessageBox.question(
-            self, f"{tag_type}급 태그 초기화", msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            count = self.file_manager.clear_tags_by_type(tag_type)
-            self.update_ui_mode()
-            self.lbl_info.setText(f"{tag_type}급 태그 {count}개 삭제(데이터) 완료")
+        """[위임] 특정 태그 전체 초기화"""
+        self.file_action.on_clear_all_tags(tag_type)
             
     def on_clear_all_highlights(self) -> None:
-        if not self.file_manager.highlights:
-            self.lbl_info.setText("삭제할 하이라이트가 없습니다.")
-            return
-
-        msg = (
-            "모든 영상의 하이라이트 구간을 삭제하시겠습니까?\n\n"
-            "※실제 영상 파일은 삭제되지 않으며,\n"
-            "저장된 북마크 시간 기록만 모두 사라집니다."
-        )
-        
-        # ThemeMessageBox 사용 (ui_components에서 import 필요)
-        from src.ui.ui_components import ThemeMessageBox
-        reply = ThemeMessageBox.question(
-            self, "하이라이트 전체 초기화", msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            count = self.file_manager.clear_all_highlights()
-            self.update_ui_mode() # 리스트 갱신
-            self.lbl_info.setText(f"하이라이트 {count}개 구간 삭제 완료")
+        """[위임] 하이라이트 전체 초기화"""
+        self.file_action.on_clear_all_highlights()
 
     # =========================================================================
     # 6. Signal Slots (시그널 슬롯)
@@ -1164,236 +1137,44 @@ class VideoSorter(QMainWindow):
                 self.last_main_path = None
 
     def soft_delete_file(self):
-        row = self.file_list.currentRow()
-        if row < 0: return
-        item_widget = self.file_list.item(row)
-        path = item_widget.data(Qt.ItemDataRole.UserRole)
-        if not path: return
-
-        # 데이터 처리
-        deleted_item = self.file_manager.soft_delete_by_path(path)
-        
-        if deleted_item:
-            logger.info(f"Soft Delete: {path}")
-            # [UX 최적화] 리로드 없이 아이템만 제거하여 스크롤/검색 유지
-            self.file_list.takeItem(row)
-            self.update_trash_button_text()
-            self.lbl_info.setText(f"휴지통으로 이동됨: {deleted_item['text']}")
-            
-            self.auto_play_next(row)
-            if self.file_manager.filter_type:
-                self.lbl_info.setText(f"{self.file_manager.filter_type}급 태그: {self.file_list.count()}개 남음")
+        """[위임] 선택된 파일을 휴지통으로 이동"""
+        self.file_action.soft_delete_file()
 
     def hard_delete_file(self):
-        row = self.file_list.currentRow()
-        if row < 0: return
-        
-        item_widget = self.file_list.item(row)
-        path = item_widget.data(Qt.ItemDataRole.UserRole)
-        if not path: return
-        
-        # 1. 플레이어 잠금 해제 (필수)
-        if hasattr(self, 'player_manager'):
-            self.player_manager.stop_and_release_path(path)
-        
-        # 2. 파일 삭제 실행 (결과 튜플 언패킹)
-        success, msg = self.file_manager.hard_delete_by_path(path)
-        
-        if success:
-            logger.info(f"Hard Delete: {path}")
-            self.file_list.takeItem(row)
-            self.update_trash_button_text()
-            self.lbl_info.setText("영구 삭제되었습니다.")
-            self.auto_play_next(row)
-            pass
-        else:
-            logger.error(f"Hard Delete Failed: {path} - {msg}")
-            ThemeMessageBox.critical(self, "오류", f"삭제 실패: {msg}")
+        """[위임] 선택된 파일을 영구 삭제"""
+        self.file_action.hard_delete_file()
 
     def restore_file(self):
-        row = self.file_list.currentRow()
-        item = self.file_manager.restore(row)
-        if item:
-            logger.info(f"Restored: {item.get('path', 'Unknown')}")
-            self.file_list.blockSignals(True)
-            self.file_list.takeItem(row)
-            self.file_list.blockSignals(False)
-            self.update_trash_button_text()
-            self.lbl_info.setText(f"복구됨: {item['text']}")
-            self.auto_play_next(row)
+        """[위임] 휴지통 파일 복원"""
+        self.file_action.restore_file()
 
     def restore_all_files(self):
-        count = self.file_manager.restore_all()
-        if count > 0:
-            self.update_ui_mode()
-            self.lbl_info.setText(f"파일 {count}개가 모두 복구되었습니다.")
-            ThemeMessageBox.information(self, "완료", f"휴지통에 있던 {count}개의 파일이\n모두 원래 목록으로 복구되었습니다.")
-        else:
-            self.lbl_info.setText("복구할 파일이 없습니다.")    
+        """[위임] 휴지통 전체 복원"""
+        self.file_action.restore_all_files()    
 
     def delete_all_trash_files(self):
-        count = len(self.file_manager.trash_files)
-        if count == 0: return
-        
-        reply = ThemeMessageBox.question(
-            self, 
-            "전체 삭제 확인", 
-            f"휴지통 {count}개 파일을 영구 삭제하시겠습니까?", 
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            targets = [item['path'] for item in self.file_manager.trash_files]
-            deleted_count = 0
-            
-            for path in targets:
-                if hasattr(self, 'player_manager'):
-                    self.player_manager.stop_and_release_path(path)
-                
-                success, _ = self.file_manager.hard_delete_by_path(path)
-                if success: deleted_count += 1
-            
-            self.file_list.clear()
-            self.update_trash_button_text()
-            self.lbl_info.setText(f"{deleted_count}개 파일 영구 삭제 완료")
-            self.reset_viewer_state()
+        """[위임] 휴지통 비우기"""
+        self.file_action.delete_all_trash_files()
 
     def toggle_hash_mark(self):
-        row = self.file_list.currentRow()
-        if row < 0: return
-        item_widget = self.file_list.item(row)
-        path = item_widget.data(Qt.ItemDataRole.UserRole)
-        if not path: return
-
-        # [Fix] 현재 모드에 맞는 파일 리스트 사용
-        current_list = self.file_manager.get_current_list()
-        real_index = -1
-        for i, item in enumerate(current_list):
-            if os.path.normpath(item['path']) == os.path.normpath(path):
-                real_index = i; break
-        
-        if real_index == -1: return
-        current_item = current_list[real_index]
-        old_basename = os.path.basename(current_item['path'])
-        
-        # 파일명에서 # 추가 또는 제거 결정
-        new_basename = old_basename[1:] if old_basename.startswith("#") else "#" + old_basename 
-        current_pos = self.player.position()
-        
-        # [Fix] 현재 활성 플레이어의 인덱스 저장 (같은 플레이어 재사용)
-        active_idx = self.player_manager.active_indices[self.player_manager.current_mode]
-        active_data = self.player_manager.get_active_player()
-        
-        # [중요] 파일 이름 변경 전 핸들 해제
-        if active_data:
-            active_data['player'].stop()
-            active_data['player'].setSource(QUrl())
-            active_data['path'] = None
-        
-        # [Fix] 이벤트 루프 강제 처리하여 Qt가 파일 핸들을 즉시 해제하도록 함
-        from PyQt6.QtWidgets import QApplication
-        QApplication.processEvents()
-        
-        # [Fix] 핸들 해제 후 딜레이를 주고 rename 실행 (파일 잠금 해제 대기)
-        def _do_rename_and_play():
-            success, msg = self.file_manager.rename_file_by_path(current_item['path'], new_basename)
-            if success: 
-                item_widget.setText(msg) 
-                new_path = current_list[real_index]['path']
-                item_widget.setData(Qt.ItemDataRole.UserRole, new_path)
-                
-                # [Fix] 같은 플레이어에 직접 새 소스 설정 (active_index 유지)
-                self.player_manager.active_indices[self.player_manager.current_mode] = active_idx
-                active_data['path'] = new_path
-                active_data['player'].setSource(QUrl.fromLocalFile(new_path))
-                active_data['item'].setOpacity(1.0)
-                active_data['item'].setZValue(10.0)
-                
-                # 위치 복원 및 재생
-                def _seek_and_play():
-                    if current_pos > 0:
-                        active_data['player'].setPosition(current_pos)
-                    if self.conf_auto_play:
-                        active_data['player'].play()
-                    active_data['audio'].setMuted(not self.chk_audio.isChecked())
-                QTimer.singleShot(50, _seek_and_play)
-            else: 
-                ThemeMessageBox.warning(self, "오류", msg)
-        
-        QTimer.singleShot(100, _do_rename_and_play)
+        """[위임] 파일명에 # 추가/제거"""
+        self.file_action.toggle_hash_mark()
 
     def save_current_highlight(self):
-        current_row = self.file_list.currentRow()
-        current_list = self.file_manager.get_current_list()
-        
-        if 0 <= current_row < len(current_list):
-            item = current_list[current_row]
-            path = item['path']
-            timestamp = self.player.position() 
-            
-            if timestamp == 0 and self.player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia:
-                timestamp = self.player.duration()
-            
-            success, msg = self.file_manager.add_highlight(path, timestamp)
-            
-            if success:
-                self.setWindowTitle(f"하이라이트 저장됨! [{int(timestamp/1000)}초]")
-                QTimer.singleShot(2000, lambda: self.setWindowTitle("Pro 동영상 플레이어"))
-            else:
-                self.setWindowTitle(f"⚠ {msg}")
-                QTimer.singleShot(2000, lambda: self.setWindowTitle("Pro 동영상 플레이어"))
+        """[위임] 현재 위치 하이라이트 저장"""
+        self.file_action.save_current_highlight()
 
     def delete_current_highlight_item(self):
-        if self.file_manager.current_mode != 'highlight': return
-        row = self.file_list.currentRow()
-        if row < 0: return
-        success, msg = self.file_manager.delete_highlight(row)
-        if success:
-            self.file_manager.get_highlight_display_list()
-            self.update_ui_mode()
-            self.setWindowTitle(f"삭제 완료")
-            self.auto_play_next(row)
-        else: QMessageBox.warning(self, "오류", msg)
+        """[위임] 현재 하이라이트 삭제"""
+        self.file_action.delete_current_highlight_item()
 
     def replay_current_highlight(self):
-        if self.file_manager.current_mode != 'highlight': return
-        row = self.file_list.currentRow()
-        if 0 <= row < self.file_list.count():
-            item_data = self.file_manager.get_current_list()[row]
-            start_pos = item_data.get('start_pos', 0)
-            self._execute_seek_and_play(start_pos)
+        """[위임] 현재 하이라이트 재생"""
+        self.file_action.replay_current_highlight()
 
     def toggle_tag_file(self, tag_char):
-        row = self.file_list.currentRow()
-        if row < 0: return
-        item_widget = self.file_list.item(row)
-        path = item_widget.data(Qt.ItemDataRole.UserRole)
-        if not path: return
-
-        new_tag = self.file_manager.toggle_file_tag(path, tag_char)
-        target_path_norm = os.path.normpath(path)
-        
-        # 목록 내 동일 파일 태그 일괄 업데이트
-        for i in range(self.file_list.count()):
-            current_item = self.file_list.item(i)
-            current_path = current_item.data(Qt.ItemDataRole.UserRole)
-            
-            if current_path and os.path.normpath(current_path) == target_path_norm:
-                base_text = current_item.text()
-                # 기존 태그 제거
-                if base_text.startswith("⭐ "): base_text = base_text[2:]
-                elif base_text.startswith("🔵 "): base_text = base_text[2:]
-                
-                prefix = ""
-                if new_tag == 'A': prefix = "⭐ "
-                elif new_tag == 'B': prefix = "🔵 "
-                
-                current_item.setText(f"{prefix}{base_text}")
-
-        if new_tag:
-            self.lbl_info.setText(f"태그 설정: {new_tag}급 ({os.path.basename(path)})")
-        else:
-            self.lbl_info.setText(f"태그 해제: {os.path.basename(path)}")
+        """[위임] 파일에 A/B 태그 토글"""
+        self.file_action.toggle_tag_file(tag_char)
 
     def auto_play_next(self, row):
         current_len = self.file_list.count()
