@@ -389,6 +389,19 @@ class FakeDurationPlayer(FakeLoadPlayer):
 
 
 class PlayerEngineSignalHandlerTest(unittest.TestCase):
+    def test_playback_status_uses_dedicated_label_when_available(self):
+        window = type("FakeWindow", (), {})()
+        window.lbl_playback_status = FakeLabel()
+        window.lbl_info = FakeLabel()
+        window.lbl_info.setText("검색 결과: 3개")
+        window._last_media_failure_key = ("C:/videos/old.mp4", "invalid")
+
+        VideoSorter._show_active_media_ready(window, "C:/videos/zeta.mp4")
+
+        self.assertEqual(window.lbl_playback_status.text, "재생 중: zeta.mp4")
+        self.assertEqual(window.lbl_info.text, "검색 결과: 3개")
+        self.assertIsNone(window._last_media_failure_key)
+
     def test_media_status_changed_delegates_to_engine(self):
         active_player = FakeLoadPlayer()
         window = type(

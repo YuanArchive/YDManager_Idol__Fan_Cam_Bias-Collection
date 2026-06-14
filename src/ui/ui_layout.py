@@ -237,9 +237,15 @@ def init_ui(window):
     group.setLayout(vbox)
     left_layout.addWidget(group)
 
-    # 상태 표시줄
-    window.lbl_info = QLabel("상태: 준비됨")
+    # 상태 표시줄: 재생 상태와 작업/검색 상태를 분리
+    window.lbl_playback_status = QLabel("재생: 대기")
+    window.lbl_playback_status.setStyleSheet(styles.LABEL_PLAYBACK_STYLE)
+    window.lbl_playback_status.setToolTip("현재 플레이어가 가리키는 영상 상태")
+    left_layout.addWidget(window.lbl_playback_status)
+
+    window.lbl_info = QLabel("작업: 준비됨")
     window.lbl_info.setStyleSheet(styles.LABEL_INFO_STYLE)
+    window.lbl_info.setToolTip("검색, 색인, 태그, 휴지통 작업 상태")
     left_layout.addWidget(window.lbl_info)
 
     # =========================================================================

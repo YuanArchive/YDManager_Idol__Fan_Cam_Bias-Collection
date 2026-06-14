@@ -561,6 +561,7 @@ class VideoSorter(QMainWindow):
                 list_item.setData(Qt.ItemDataRole.UserRole, item['path']) 
                 if 'start_pos' in item:
                     list_item.setData(Qt.ItemDataRole.UserRole + 1, item['start_pos'])
+                list_item.setToolTip(self._build_file_item_tooltip(item, is_trash))
                 list_item.setForeground(Qt.GlobalColor.white)
                 self.file_list.addItem(list_item) 
         finally:
@@ -624,11 +625,55 @@ class VideoSorter(QMainWindow):
             
         self.file_list.blockSignals(False)
 
+    def _count_live_tagged_files(self, tag_type: str) -> int:
+        file_tags = getattr(self.file_manager, "file_tags", {})
+        count = 0
+        for path, tag in file_tags.items():
+            if tag != tag_type:
+                continue
+            try:
+                if os.path.exists(path):
+                    count += 1
+            except (TypeError, ValueError):
+                continue
+        return count
+
+    def _count_highlights(self) -> int:
+        highlights = getattr(self.file_manager, "highlights", {})
+        total = 0
+        for values in highlights.values():
+            if isinstance(values, list):
+                total += len(values)
+        return total
+
+    def _update_filter_button_labels(self) -> None:
+        self.btn_filter_a.setText(f"A {self._count_live_tagged_files('A')}")
+        self.btn_filter_b.setText(f"B {self._count_live_tagged_files('B')}")
+        highlight_count = self._count_highlights()
+        self.btn_highlight.setText(f"하이라이트 {highlight_count}" if highlight_count else "하이라이트")
+
+    def _build_file_item_tooltip(self, item: dict, is_trash: bool) -> str:
+        path = item.get("path", "")
+        lines = [path] if path else []
+        if is_trash:
+            lines.append("상태: 휴지통")
+        if os.path.basename(path).startswith("#"):
+            lines.append("상태: # 마킹됨")
+        tag = getattr(self.file_manager, "file_tags", {}).get(os.path.normcase(os.path.normpath(path)))
+        if tag:
+            lines.append(f"태그: {tag}")
+        if "start_pos" in item:
+            seconds = int(item.get("start_pos", 0) / 1000)
+            lines.append(f"하이라이트: {seconds // 60:02d}:{seconds % 60:02d}")
+        return "\n".join(lines)
+
     def _update_visible_widgets(self, mode, f_type, is_trash, list_count):
         """UI 요소들의 가시성(Visibility)을 상태에 맞춰 토글합니다."""
         show_tag_a = (not is_trash and mode == 'main' and f_type == 'A')
         show_tag_b = (not is_trash and mode == 'main' and f_type == 'B')
         show_highlight_clear = (mode == 'highlight')
+
+        self._update_filter_button_labels()
         
         if self.btn_clear_tag_a.isVisible() != show_tag_a:
             self.btn_clear_tag_a.setVisible(show_tag_a)
@@ -996,6 +1041,13 @@ class VideoSorter(QMainWindow):
     # 6. Signal Slots (시그널 슬롯)
     # =========================================================================
 
+    def _set_playback_status(self, message: str) -> None:
+        playback_label = getattr(self, "lbl_playback_status", None)
+        if playback_label is not None:
+            playback_label.setText(message)
+        elif hasattr(self, "lbl_info"):
+            self.lbl_info.setText(message)
+
     def _show_active_media_failure(self, error_text=None) -> None:
         filename = "선택한 파일"
         path = None
@@ -1021,16 +1073,15 @@ class VideoSorter(QMainWindow):
         self._last_media_failure_key = failure_key
 
         message = f"재생 실패: {filename}"
-        if hasattr(self, "lbl_info"):
-            self.lbl_info.setText(message)
+        VideoSorter._set_playback_status(self, message)
         if hasattr(self, "video_view"):
             self.video_view.show_temp_message(message)
         logger.warning("Media load failed: %s (%s)", filename, error_text or "unknown")
 
     def _show_active_media_ready(self, path: str | None) -> None:
-        if not path or not hasattr(self, "lbl_info"):
+        if not path:
             return
-        self.lbl_info.setText(f"재생 중: {os.path.basename(path)}")
+        VideoSorter._set_playback_status(self, f"재생 중: {os.path.basename(path)}")
         self._last_media_failure_key = None
 
     def on_media_status_changed(self, status):
@@ -1218,7 +1269,7 @@ class VideoSorter(QMainWindow):
                 self.root_folder = ""
                 self.file_list.clear()
                 self.reset_viewer_state()
-                self.lbl_info.setText("상태: 준비됨")
+                self.lbl_info.setText("작업: 준비됨")
             else:
                 if self.file_manager.current_mode == 'main':
                     self.save_main_state()
@@ -1237,7 +1288,11 @@ class VideoSorter(QMainWindow):
                 active_data['path'] = None
                 active_data['item'].setOpacity(0.0)
 
-        if hasattr(self, 'lbl_info'):
+        if hasattr(self, 'lbl_playback_status'):
+            self.lbl_playback_status.setText("재생: 대기")
+            if hasattr(self, 'lbl_info'):
+                self.lbl_info.setText("작업: 준비됨")
+        elif hasattr(self, 'lbl_info'):
             self.lbl_info.setText("상태: 준비됨")
 
         if hasattr(self, 'video_view') and hasattr(self.video_view, 'info_text'):

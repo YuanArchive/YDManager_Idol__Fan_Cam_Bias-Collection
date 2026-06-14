@@ -34,6 +34,18 @@ class SignalSetupStaticTest(unittest.TestCase):
         self.assertNotIn("window.btn_refresh.clicked.connect(window.load_files)", source)
 
 
+class StatusLayoutStaticTest(unittest.TestCase):
+    def test_left_panel_has_separate_playback_and_activity_status_labels(self):
+        source = (ROOT / "src" / "ui" / "ui_layout.py").read_text(encoding="utf-8")
+        styles = (ROOT / "src" / "ui" / "styles.py").read_text(encoding="utf-8")
+
+        self.assertIn("window.lbl_playback_status = QLabel", source)
+        self.assertIn("window.lbl_info = QLabel", source)
+        self.assertIn("LABEL_PLAYBACK_STYLE", source)
+        self.assertIn("LABEL_INFO_STYLE", source)
+        self.assertIn("LABEL_PLAYBACK_STYLE =", styles)
+
+
 class ReadmeShortcutStaticTest(unittest.TestCase):
     def test_readme_documents_mode_specific_delete_enter_and_restore_shortcuts(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

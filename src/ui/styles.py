@@ -366,7 +366,17 @@ COMBO_MINI_STYLE = f"""
 """
 
 # [상태 라벨]
-LABEL_INFO_STYLE = f"color: {CurrentTheme.TEXT_SUB}; font-weight: bold; margin-top: 18px;"
+LABEL_PLAYBACK_STYLE = f"""
+    color: {CurrentTheme.ACCENT_GREEN};
+    font-weight: bold;
+    margin-top: 8px;
+"""
+
+LABEL_INFO_STYLE = f"""
+    color: {CurrentTheme.TEXT_SUB};
+    font-weight: bold;
+    margin-top: 0px;
+"""
 
 
 # =============================================================================
