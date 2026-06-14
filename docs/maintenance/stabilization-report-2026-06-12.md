@@ -3,7 +3,7 @@
 ## Automated Result
 
 - Latest rerun: 2026-06-14.
-- `tools/run_checks.ps1`: 133 unittest cases passed.
+- `tools/run_checks.ps1`: 163 unittest cases passed.
 - `compileall`: passed for `main.py`, `src`, `tests`, and `tools`.
 - Synthetic scan/cache smoke: passed from `tools/run_checks.ps1`.
 - Source GUI startup smoke: passed from `tools/run_checks.ps1`.

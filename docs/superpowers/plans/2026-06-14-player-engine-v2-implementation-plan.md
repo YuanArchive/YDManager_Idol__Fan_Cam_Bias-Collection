@@ -1605,7 +1605,7 @@ Run:
 
 ```powershell
 git diff --check
-rg -n '124 unittest|131 unittest|Ran 124|Ran 131|ydm-debug-smoke|F:\\YDM|F:/YDM' docs README.md BUILD.md tests tools .github src main.py setup.iss YDManager.spec requirements.txt requirements-build.txt requirements-lock.txt
+rg -n '<old-unittest-count-marker>|<old-debug-smoke-marker>|<local-machine-path>' docs README.md BUILD.md tests tools .github src main.py setup.iss YDManager.spec requirements.txt requirements-build.txt requirements-lock.txt
 ```
 
 Expected result:
