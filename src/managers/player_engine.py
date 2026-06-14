@@ -195,3 +195,91 @@ class PlayerEngine:
             waiting_for_media=waiting,
             fallback_required=waiting,
         )
+
+    def _slot_matches(self, slot, path: str, generation: int) -> bool:
+        return (
+            slot.expected_generation == generation
+            and slot.expected_path is not None
+            and os.path.normcase(os.path.normpath(slot.expected_path)) == os.path.normcase(os.path.normpath(path))
+            and slot.state in {SlotState.PRELOADING, SlotState.READY, SlotState.ACTIVE}
+            and source_matches_path(slot, path)
+        )
+
+    def _find_or_assign_neighbor_slot(self, path: str, generation: int, protected_slot_ids=None):
+        protected_slot_ids = protected_slot_ids or set()
+        for slot in self.slots:
+            if slot.slot_id in protected_slot_ids:
+                continue
+            if self._slot_matches(slot, path, generation):
+                return slot
+        for slot in self.slots:
+            if slot.slot_id in protected_slot_ids:
+                continue
+            if slot.state == SlotState.EMPTY:
+                return slot
+        for slot in self.slots:
+            if slot.slot_id in protected_slot_ids:
+                continue
+            if slot.state not in {SlotState.ACTIVE, SlotState.READY}:
+                slot.clear()
+                return slot
+        return None
+
+    def _prune_invalid_preloads(self, generation: int) -> None:
+        for slot in self.slots:
+            if slot.state == SlotState.ACTIVE:
+                continue
+            if slot.state not in {SlotState.PRELOADING, SlotState.READY, SlotState.STALE, SlotState.FAILED}:
+                continue
+            if (
+                slot.expected_generation != generation
+                or slot.expected_path is None
+                or not source_matches_path(slot, slot.expected_path)
+            ):
+                slot.clear()
+
+    def _start_preload(self, slot, item: PlaybackItem, generation: int, role: SlotRole) -> None:
+        norm_path = self._normalize_path(item.path)
+        if self._slot_matches(slot, norm_path, generation):
+            slot.role = role
+            return
+        if slot.state != SlotState.EMPTY:
+            slot.clear()
+        slot.expected_path = norm_path
+        slot.expected_generation = generation
+        slot.requested_start_pos = item.start_pos
+        slot.role = role
+        slot.state = SlotState.PRELOADING
+        slot.audio.setMuted(True)
+        slot.video_item.setOpacity(0.0)
+        slot.video_item.setZValue(0.0)
+        slot.player.setSource(_qurl_from_path(norm_path))
+        slot.player.pause()
+        if item.start_pos > 0:
+            slot.player.setPosition(item.start_pos)
+
+    def plan_neighbors(self, current_index: int, playlist: list[PlaybackItem], generation: int) -> None:
+        self._prune_invalid_preloads(generation)
+        targets = []
+        if current_index + 1 < len(playlist):
+            targets.append((playlist[current_index + 1], SlotRole.NEXT))
+        if current_index - 1 >= 0:
+            targets.append((playlist[current_index - 1], SlotRole.PREVIOUS))
+
+        protected_slots = set()
+        for item, role in targets:
+            slot = self._find_or_assign_neighbor_slot(item.path, generation, protected_slots)
+            if slot and slot.state != SlotState.READY:
+                self._start_preload(slot, item, generation, role)
+            elif slot:
+                slot.role = role
+            if slot:
+                protected_slots.add(slot.slot_id)
+
+        for slot in self.slots:
+            if slot.state == SlotState.ACTIVE:
+                continue
+            if slot.slot_id in protected_slots:
+                continue
+            if slot.state in {SlotState.PRELOADING, SlotState.READY, SlotState.STALE, SlotState.FAILED}:
+                slot.clear()

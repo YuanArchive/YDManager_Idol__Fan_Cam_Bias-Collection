@@ -2,6 +2,7 @@ import os
 import unittest
 
 from src.managers.player_engine import (
+    PlaybackItem,
     PlayerEngine,
     PlayerSlot,
     SlotRole,
@@ -205,6 +206,83 @@ class PlayerEngineActivationTest(unittest.TestCase):
         self.assertEqual(slot.expected_generation, 2)
         self.assertEqual(slot.state, SlotState.ACTIVE)
         self.assertTrue(engine.fallback_timer.started)
+
+
+class PlayerEnginePreloadPlanTest(unittest.TestCase):
+    def test_plan_neighbors_keeps_next_and_previous_slots(self):
+        active = make_slot(0, "C:/videos/b.mp4", SlotState.ACTIVE, 4, SlotRole.CURRENT)
+        next_slot = make_slot(1)
+        prev_slot = make_slot(2)
+        engine = make_engine([active, next_slot, prev_slot])
+        playlist = [
+            PlaybackItem("C:/videos/a.mp4"),
+            PlaybackItem("C:/videos/b.mp4"),
+            PlaybackItem("C:/videos/c.mp4"),
+        ]
+
+        engine.plan_neighbors(current_index=1, playlist=playlist, generation=4)
+
+        self.assertEqual(next_slot.state, SlotState.PRELOADING)
+        self.assertEqual(next_slot.role, SlotRole.NEXT)
+        self.assertEqual(next_slot.expected_path, os.path.normpath("C:/videos/c.mp4"))
+        self.assertEqual(prev_slot.state, SlotState.PRELOADING)
+        self.assertEqual(prev_slot.role, SlotRole.PREVIOUS)
+        self.assertEqual(prev_slot.expected_path, os.path.normpath("C:/videos/a.mp4"))
+
+    def test_plan_neighbors_does_not_clear_ready_neighbor(self):
+        active = make_slot(0, "C:/videos/b.mp4", SlotState.ACTIVE, 4, SlotRole.CURRENT)
+        ready_next = make_slot(1, "C:/videos/c.mp4", SlotState.READY, 4, SlotRole.NEXT)
+        spare = make_slot(2)
+        engine = make_engine([active, ready_next, spare])
+        playlist = [
+            PlaybackItem("C:/videos/a.mp4"),
+            PlaybackItem("C:/videos/b.mp4"),
+            PlaybackItem("C:/videos/c.mp4"),
+        ]
+
+        engine.plan_neighbors(current_index=1, playlist=playlist, generation=4)
+
+        self.assertEqual(ready_next.state, SlotState.READY)
+        self.assertEqual(ready_next.role, SlotRole.NEXT)
+        self.assertEqual(ready_next.player.stop_count, 0)
+
+    def test_plan_neighbors_clears_ready_neighbor_when_real_source_is_stale(self):
+        active = make_slot(0, "C:/videos/b.mp4", SlotState.ACTIVE, 4, SlotRole.CURRENT)
+        stale_next = make_slot(1, "C:/videos/c.mp4", SlotState.READY, 4, SlotRole.NEXT)
+        replacement = make_slot(2)
+        stale_next.player.source_path = os.path.normpath("C:/videos/other.mp4")
+        engine = make_engine([active, stale_next, replacement])
+        playlist = [
+            PlaybackItem("C:/videos/a.mp4"),
+            PlaybackItem("C:/videos/b.mp4"),
+            PlaybackItem("C:/videos/c.mp4"),
+        ]
+
+        engine.plan_neighbors(current_index=1, playlist=playlist, generation=4)
+
+        self.assertEqual(stale_next.player.stop_count, 1)
+        self.assertEqual(stale_next.state, SlotState.PRELOADING)
+        self.assertEqual(stale_next.role, SlotRole.NEXT)
+        self.assertEqual(stale_next.expected_path, os.path.normpath("C:/videos/c.mp4"))
+        self.assertEqual(replacement.state, SlotState.PRELOADING)
+        self.assertEqual(replacement.role, SlotRole.PREVIOUS)
+        self.assertEqual(replacement.expected_path, os.path.normpath("C:/videos/a.mp4"))
+
+    def test_plan_neighbors_does_not_steal_next_slot_when_only_one_spare_exists(self):
+        active = make_slot(0, "C:/videos/b.mp4", SlotState.ACTIVE, 4, SlotRole.CURRENT)
+        spare = make_slot(1)
+        engine = make_engine([active, spare])
+        playlist = [
+            PlaybackItem("C:/videos/a.mp4"),
+            PlaybackItem("C:/videos/b.mp4"),
+            PlaybackItem("C:/videos/c.mp4"),
+        ]
+
+        engine.plan_neighbors(current_index=1, playlist=playlist, generation=4)
+
+        self.assertEqual(spare.state, SlotState.PRELOADING)
+        self.assertEqual(spare.role, SlotRole.NEXT)
+        self.assertEqual(spare.expected_path, os.path.normpath("C:/videos/c.mp4"))
 
 
 if __name__ == "__main__":
