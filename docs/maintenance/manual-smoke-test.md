@@ -88,6 +88,23 @@ See `docs/maintenance/playback-state.md` for the player mode and file-release ru
 - [ ] Hard delete the active video and confirm no file-lock error occurs.
 - [ ] Enter search, play a result, clear search, and confirm active source remains valid.
 
+## Player Engine v3 Continuity Smoke
+
+Scripted source-app continuity check:
+
+```powershell
+.\.venv\Scripts\python.exe .\tools\smoke_player_continuity.py
+```
+
+Latest scripted result on 2026-06-15:
+
+- Main -> A -> Main: passed; watch session path and active player source stayed unchanged.
+- Main -> B -> Main: passed; B list did not steal playback from the watched video.
+- Main -> Highlight -> Main: passed; highlight list refresh stayed passive.
+- Main -> Trash -> Main: passed; empty/non-current trash view did not reset playback.
+- Search while watching: passed; search and search-clear refreshes stayed passive.
+- Non-active soft delete/restore: passed; visible candidate file action did not auto-advance playback.
+
 ## Shortcut And Privacy Workflow
 
 - Press `Tab` repeatedly and verify focus cycles through the expected panels.
