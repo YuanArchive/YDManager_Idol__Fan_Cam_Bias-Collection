@@ -109,5 +109,31 @@ class PlayerSlotStateTest(unittest.TestCase):
         self.assertIsNone(slot.last_status)
 
 
+class PlayerSlotClearTest(unittest.TestCase):
+    def test_clear_slot_releases_media_and_hides_item(self):
+        slot = make_slot(path="C:/videos/a.mp4", state=SlotState.READY, generation=3, role=SlotRole.NEXT)
+
+        slot.clear()
+
+        self.assertEqual(slot.state, SlotState.EMPTY)
+        self.assertEqual(slot.role, SlotRole.SPARE)
+        self.assertIsNone(slot.expected_path)
+        self.assertEqual(slot.expected_generation, 0)
+        self.assertEqual(slot.player.stop_count, 1)
+        self.assertEqual(slot.player.source_path, "")
+        self.assertTrue(slot.audio.muted)
+        self.assertEqual(slot.video_item.opacity, 0.0)
+        self.assertEqual(slot.video_item.z, 0.0)
+
+    def test_source_matches_path_uses_real_player_source_not_only_metadata(self):
+        from src.managers.player_engine import source_matches_path
+
+        slot = make_slot(path="C:/videos/a.mp4", state=SlotState.READY, generation=1)
+        slot.expected_path = "C:/videos/b.mp4"
+
+        self.assertFalse(source_matches_path(slot, "C:/videos/b.mp4"))
+        self.assertTrue(source_matches_path(slot, "C:/videos/a.mp4"))
+
+
 if __name__ == "__main__":
     unittest.main()
