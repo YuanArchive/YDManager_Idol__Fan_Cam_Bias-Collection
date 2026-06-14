@@ -355,6 +355,17 @@ class PlayerEngineActivationTest(unittest.TestCase):
         self.assertEqual(active.expected_generation, 5)
         self.assertEqual(active.player.set_source_calls, [])
 
+    def test_activate_repairs_expected_path_when_reusing_slot_by_matching_source(self):
+        slot = make_slot(0, "C:/videos/stale-name.mp4", SlotState.READY, 4, SlotRole.NEXT)
+        slot.player.source_path = os.path.normpath("C:/videos/a.mp4")
+        engine = make_engine([slot])
+
+        result = engine.activate("C:/videos/a.mp4", start_pos=0, generation=4, autoplay=True)
+
+        self.assertTrue(result.reused_source)
+        self.assertEqual(slot.expected_path, os.path.normpath("C:/videos/a.mp4"))
+        self.assertEqual(slot.expected_generation, 4)
+
     def test_preloading_hit_promotes_and_arms_fallback(self):
         slot = make_slot(1, "C:/videos/next.mp4", SlotState.PRELOADING, 7, SlotRole.NEXT)
         engine = make_engine([make_slot(0, "C:/videos/current.mp4", SlotState.ACTIVE, 7, SlotRole.CURRENT), slot])
@@ -458,6 +469,88 @@ class PlayerEnginePreloadPlanTest(unittest.TestCase):
         self.assertEqual(spare.role, SlotRole.NEXT)
         self.assertEqual(spare.expected_path, os.path.normpath("C:/videos/c.mp4"))
 
+    def test_directional_forward_plan_prefers_next_two_items(self):
+        active = make_slot(0, "C:/videos/c.mp4", SlotState.ACTIVE, 5, SlotRole.CURRENT)
+        first = make_slot(1)
+        second = make_slot(2)
+        engine = make_engine([active, first, second])
+        playlist = [
+            PlaybackItem("C:/videos/a.mp4"),
+            PlaybackItem("C:/videos/b.mp4"),
+            PlaybackItem("C:/videos/c.mp4"),
+            PlaybackItem("C:/videos/d.mp4"),
+            PlaybackItem("C:/videos/e.mp4"),
+        ]
+
+        engine.plan_neighbors(current_index=2, playlist=playlist, generation=5, preferred_direction=1)
+
+        self.assertEqual(first.state, SlotState.PRELOADING)
+        self.assertEqual(first.role, SlotRole.NEXT)
+        self.assertEqual(first.expected_path, os.path.normpath("C:/videos/d.mp4"))
+        self.assertEqual(second.state, SlotState.PRELOADING)
+        self.assertEqual(second.role, SlotRole.FORWARD_LOOKAHEAD)
+        self.assertEqual(second.expected_path, os.path.normpath("C:/videos/e.mp4"))
+
+    def test_directional_backward_plan_prefers_previous_two_items(self):
+        active = make_slot(0, "C:/videos/c.mp4", SlotState.ACTIVE, 5, SlotRole.CURRENT)
+        first = make_slot(1)
+        second = make_slot(2)
+        engine = make_engine([active, first, second])
+        playlist = [
+            PlaybackItem("C:/videos/a.mp4"),
+            PlaybackItem("C:/videos/b.mp4"),
+            PlaybackItem("C:/videos/c.mp4"),
+            PlaybackItem("C:/videos/d.mp4"),
+            PlaybackItem("C:/videos/e.mp4"),
+        ]
+
+        engine.plan_neighbors(current_index=2, playlist=playlist, generation=5, preferred_direction=-1)
+
+        self.assertEqual(first.state, SlotState.PRELOADING)
+        self.assertEqual(first.role, SlotRole.PREVIOUS)
+        self.assertEqual(first.expected_path, os.path.normpath("C:/videos/b.mp4"))
+        self.assertEqual(second.state, SlotState.PRELOADING)
+        self.assertEqual(second.role, SlotRole.BACKWARD_LOOKAHEAD)
+        self.assertEqual(second.expected_path, os.path.normpath("C:/videos/a.mp4"))
+
+    def test_plan_neighbors_replaces_obsolete_ready_slot_in_same_pass(self):
+        active = make_slot(0, "C:/videos/b.mp4", SlotState.ACTIVE, 7, SlotRole.CURRENT)
+        obsolete_ready = make_slot(1, "C:/videos/old.mp4", SlotState.READY, 7, SlotRole.PREVIOUS)
+        next_slot = make_slot(2)
+        engine = make_engine([active, obsolete_ready, next_slot])
+        playlist = [
+            PlaybackItem("C:/videos/a.mp4"),
+            PlaybackItem("C:/videos/b.mp4"),
+            PlaybackItem("C:/videos/c.mp4"),
+        ]
+
+        engine.plan_neighbors(current_index=1, playlist=playlist, generation=7)
+
+        self.assertEqual(next_slot.state, SlotState.PRELOADING)
+        self.assertEqual(next_slot.role, SlotRole.NEXT)
+        self.assertEqual(next_slot.expected_path, os.path.normpath("C:/videos/c.mp4"))
+        self.assertEqual(obsolete_ready.state, SlotState.PRELOADING)
+        self.assertEqual(obsolete_ready.role, SlotRole.PREVIOUS)
+        self.assertEqual(obsolete_ready.expected_path, os.path.normpath("C:/videos/a.mp4"))
+
+    def test_plan_neighbors_retains_same_source_ready_neighbor_across_generation_change(self):
+        active = make_slot(0, "C:/videos/b.mp4", SlotState.ACTIVE, 8, SlotRole.CURRENT)
+        ready_next = make_slot(1, "C:/videos/c.mp4", SlotState.READY, 7, SlotRole.NEXT)
+        spare = make_slot(2)
+        engine = make_engine([active, ready_next, spare])
+        playlist = [
+            PlaybackItem("C:/videos/a.mp4"),
+            PlaybackItem("C:/videos/b.mp4"),
+            PlaybackItem("C:/videos/c.mp4"),
+        ]
+
+        engine.plan_neighbors(current_index=1, playlist=playlist, generation=8)
+
+        self.assertEqual(ready_next.state, SlotState.READY)
+        self.assertEqual(ready_next.role, SlotRole.NEXT)
+        self.assertEqual(ready_next.expected_generation, 8)
+        self.assertEqual(ready_next.player.stop_count, 0)
+
 
 class MediaStatus:
     LoadedMedia = "loaded"
@@ -478,6 +571,17 @@ class PlayerEngineStatusTest(unittest.TestCase):
 
         self.assertEqual(ready_next.state, SlotState.READY)
         self.assertEqual(ready_next.player.stop_count, 0)
+
+    def test_loaded_status_does_not_mark_mismatched_preload_ready(self):
+        preload = make_slot(0, "C:/videos/a.mp4", SlotState.PRELOADING, 3, SlotRole.NEXT)
+        preload.player.source_path = os.path.normpath("C:/videos/other.mp4")
+        engine = make_engine([preload])
+        engine.current_generation = 3
+
+        handled = engine.handle_media_status(preload.player, MediaStatus.LoadedMedia)
+
+        self.assertFalse(handled)
+        self.assertEqual(preload.state, SlotState.PRELOADING)
 
     def test_reveal_requires_active_generation_source_and_privacy_clear(self):
         active = make_slot(0, "C:/videos/a.mp4", SlotState.ACTIVE, 3, SlotRole.CURRENT)

@@ -19,6 +19,8 @@ class SlotRole(str, Enum):
     CURRENT = "current"
     NEXT = "next"
     PREVIOUS = "previous"
+    FORWARD_LOOKAHEAD = "forward_lookahead"
+    BACKWARD_LOOKAHEAD = "backward_lookahead"
     SPARE = "spare"
 
 
@@ -269,10 +271,7 @@ class PlayerEngine:
             slot = self._find_valid_slot(norm_path, generation)
             if slot is None:
                 slot = self._find_loaded_slot_by_source(norm_path)
-                if slot is not None:
-                    slot.expected_generation = generation
-                    self._set_slot_path(slot, norm_path)
-        else:
+        if slot is not None:
             slot.expected_generation = generation
             self._set_slot_path(slot, norm_path)
         reused = slot is not None
@@ -336,10 +335,16 @@ class PlayerEngine:
 
     def _find_or_assign_neighbor_slot(self, path: str, generation: int, protected_slot_ids=None):
         protected_slot_ids = protected_slot_ids or set()
+        norm_path = self._normalize_path(path)
         for slot in self._active_slots():
             if slot.slot_id in protected_slot_ids:
                 continue
-            if self._slot_matches(slot, path, generation):
+            if self._slot_matches(slot, norm_path, generation):
+                return slot
+        for slot in self._active_slots():
+            if slot.slot_id in protected_slot_ids:
+                continue
+            if slot.state in {SlotState.PRELOADING, SlotState.READY} and source_matches_path(slot, norm_path):
                 return slot
         for slot in self._active_slots():
             if slot.slot_id in protected_slot_ids:
@@ -352,20 +357,39 @@ class PlayerEngine:
             if slot.state not in {SlotState.ACTIVE, SlotState.READY}:
                 slot.clear()
                 return slot
+        for slot in self._active_slots():
+            if slot.slot_id in protected_slot_ids:
+                continue
+            if slot.state == SlotState.READY:
+                slot.clear()
+                return slot
         return None
 
-    def _prune_invalid_preloads(self, generation: int) -> None:
+    def _prune_invalid_preloads(self, generation: int, keep_paths=None) -> None:
+        keep_paths = [self._normalize_path(path) for path in keep_paths or []]
         for slot in self._active_slots():
             if slot.state == SlotState.ACTIVE:
                 continue
             if slot.state not in {SlotState.PRELOADING, SlotState.READY, SlotState.STALE, SlotState.FAILED}:
                 continue
-            if (
-                slot.expected_generation != generation
-                or slot.expected_path is None
-                or not source_matches_path(slot, slot.expected_path)
-            ):
+            metadata_valid = (
+                slot.expected_generation == generation
+                and slot.expected_path is not None
+                and source_matches_path(slot, slot.expected_path)
+            )
+            source_is_planned_target = any(source_matches_path(slot, path) for path in keep_paths)
+            if not metadata_valid and not source_is_planned_target:
                 slot.clear()
+
+    def _refresh_preloaded_slot(self, slot, item: PlaybackItem, generation: int, role: SlotRole) -> None:
+        norm_path = self._normalize_path(item.path)
+        self._set_slot_path(slot, norm_path)
+        slot.expected_generation = generation
+        slot.requested_start_pos = item.start_pos
+        slot.role = role
+        slot.audio.setMuted(True)
+        slot.video_item.setOpacity(0.0)
+        slot.video_item.setZValue(0.0)
 
     def _start_preload(self, slot, item: PlaybackItem, generation: int, role: SlotRole) -> None:
         norm_path = self._normalize_path(item.path)
@@ -387,18 +411,54 @@ class PlayerEngine:
         if item.start_pos > 0:
             slot.player.setPosition(item.start_pos)
 
-    def plan_neighbors(self, current_index: int, playlist: list[PlaybackItem], generation: int) -> None:
-        self._prune_invalid_preloads(generation)
+    def _preload_targets(
+        self,
+        current_index: int,
+        playlist: list[PlaybackItem],
+        preferred_direction: int = 0,
+    ):
+        if preferred_direction > 0:
+            offsets = [
+                (1, SlotRole.NEXT),
+                (2, SlotRole.FORWARD_LOOKAHEAD),
+                (-1, SlotRole.PREVIOUS),
+            ]
+        elif preferred_direction < 0:
+            offsets = [
+                (-1, SlotRole.PREVIOUS),
+                (-2, SlotRole.BACKWARD_LOOKAHEAD),
+                (1, SlotRole.NEXT),
+            ]
+        else:
+            offsets = [
+                (1, SlotRole.NEXT),
+                (-1, SlotRole.PREVIOUS),
+            ]
+
         targets = []
-        if current_index + 1 < len(playlist):
-            targets.append((playlist[current_index + 1], SlotRole.NEXT))
-        if current_index - 1 >= 0:
-            targets.append((playlist[current_index - 1], SlotRole.PREVIOUS))
+        for offset, role in offsets:
+            index = current_index + offset
+            if 0 <= index < len(playlist):
+                targets.append((playlist[index], role))
+        return targets
+
+    def plan_neighbors(
+        self,
+        current_index: int,
+        playlist: list[PlaybackItem],
+        generation: int,
+        preferred_direction: int = 0,
+    ) -> None:
+        self.current_generation = generation
+        targets = self._preload_targets(current_index, playlist, preferred_direction)
+        self._prune_invalid_preloads(generation, keep_paths=[item.path for item, _role in targets])
 
         protected_slots = set()
         for item, role in targets:
             slot = self._find_or_assign_neighbor_slot(item.path, generation, protected_slots)
-            if slot and slot.state != SlotState.READY:
+            if slot and slot.state in {SlotState.PRELOADING, SlotState.READY} and source_matches_path(slot, item.path):
+                self._refresh_preloaded_slot(slot, item, generation, role)
+            elif slot and slot.state != SlotState.READY:
                 self._start_preload(slot, item, generation, role)
             elif slot:
                 slot.role = role
@@ -468,7 +528,12 @@ class PlayerEngine:
             self._mark_failed(slot, status)
             return False
         if slot.state == SlotState.PRELOADING and self._is_loaded_status(status):
-            slot.state = SlotState.READY
+            if (
+                slot.expected_generation == self.current_generation
+                and slot.expected_path is not None
+                and source_matches_path(slot, slot.expected_path)
+            ):
+                slot.state = SlotState.READY
             return False
         if slot.state == SlotState.ACTIVE:
             revealed = self.reveal_if_allowed(slot, status)
