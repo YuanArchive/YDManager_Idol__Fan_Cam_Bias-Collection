@@ -2,6 +2,7 @@ import os
 import unittest
 
 from src.managers.player_engine import (
+    PlayerEngine,
     PlayerSlot,
     SlotRole,
     SlotState,
@@ -133,6 +134,77 @@ class PlayerSlotClearTest(unittest.TestCase):
 
         self.assertFalse(source_matches_path(slot, "C:/videos/b.mp4"))
         self.assertTrue(source_matches_path(slot, "C:/videos/a.mp4"))
+
+
+class FakeTimer:
+    def __init__(self):
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
+
+
+class FakePrivacy:
+    def __init__(self, blocked=False):
+        self.blocked = blocked
+
+    def __call__(self):
+        return self.blocked
+
+
+def make_engine(slots, privacy_blocked=False):
+    return PlayerEngine(
+        slots=slots,
+        fallback_timer=FakeTimer(),
+        privacy_guard=FakePrivacy(privacy_blocked),
+        autoplay_getter=lambda: True,
+        audio_enabled_getter=lambda: True,
+    )
+
+
+class PlayerEngineActivationTest(unittest.TestCase):
+    def test_ready_preload_promotes_without_setting_source_again(self):
+        slot = make_slot(1, "C:/videos/next.mp4", SlotState.READY, 7, SlotRole.NEXT)
+        engine = make_engine([make_slot(0, "C:/videos/current.mp4", SlotState.ACTIVE, 7, SlotRole.CURRENT), slot])
+
+        result = engine.activate("C:/videos/next.mp4", start_pos=0, generation=7, autoplay=True)
+
+        self.assertEqual(result.slot_id, 1)
+        self.assertTrue(result.reused_source)
+        self.assertFalse(result.waiting_for_media)
+        self.assertEqual(slot.state, SlotState.ACTIVE)
+        self.assertEqual(slot.role, SlotRole.CURRENT)
+        self.assertEqual(len(slot.player.set_source_calls), 0)
+
+    def test_preloading_hit_promotes_and_arms_fallback(self):
+        slot = make_slot(1, "C:/videos/next.mp4", SlotState.PRELOADING, 7, SlotRole.NEXT)
+        engine = make_engine([make_slot(0, "C:/videos/current.mp4", SlotState.ACTIVE, 7, SlotRole.CURRENT), slot])
+
+        result = engine.activate("C:/videos/next.mp4", start_pos=0, generation=7, autoplay=True)
+
+        self.assertEqual(result.slot_id, 1)
+        self.assertTrue(result.reused_source)
+        self.assertTrue(result.waiting_for_media)
+        self.assertTrue(result.fallback_required)
+        self.assertTrue(engine.fallback_timer.started)
+
+    def test_new_activation_sets_source_and_arms_fallback(self):
+        slot = make_slot(0)
+        engine = make_engine([slot])
+
+        result = engine.activate("C:/videos/a.mp4", start_pos=0, generation=2, autoplay=True)
+
+        self.assertEqual(result.slot_id, 0)
+        self.assertFalse(result.reused_source)
+        self.assertTrue(result.waiting_for_media)
+        self.assertEqual(slot.expected_path, os.path.normpath("C:/videos/a.mp4"))
+        self.assertEqual(slot.expected_generation, 2)
+        self.assertEqual(slot.state, SlotState.ACTIVE)
+        self.assertTrue(engine.fallback_timer.started)
 
 
 if __name__ == "__main__":
