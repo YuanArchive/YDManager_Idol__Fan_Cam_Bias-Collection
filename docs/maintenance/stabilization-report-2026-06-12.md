@@ -3,7 +3,7 @@
 ## Automated Result
 
 - Latest rerun: 2026-06-15.
-- `tools/run_checks.ps1`: 173 unittest cases passed.
+- `tools/run_checks.ps1`: 192 unittest cases passed.
 - `compileall`: passed for `main.py`, `src`, `tests`, and `tools`.
 - Synthetic scan/cache smoke: passed from `tools/run_checks.ps1`.
 - Source GUI startup smoke: passed from `tools/run_checks.ps1`.
@@ -74,6 +74,7 @@
 - Cleanup static tests now guard against duplicated startup display logs and repeated names in import statements.
 - Parallel code review found no critical issues; its important stale-count and malformed soft-delete/restore findings are addressed.
 - Player Engine v2 introduces explicit slot state, generation guards, preload promotion, path/source reveal validation, and privacy-aware reveal checks.
+- Player Engine v3 continuity work separates visible menu/list navigation from the active watch session, keeps passive A/B/highlight/trash/search refreshes from stealing playback, and makes non-active file actions avoid unintended auto-advance.
 
 ## Remaining Release Risks
 

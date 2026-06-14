@@ -18,7 +18,7 @@ Fast browsing keeps the active video plus next and previous candidates in the cu
 - `main`, `A`, `B`, and `trash`: 3 players each.
 - `highlight`: 1 player for deterministic highlight replay.
 
-`PlayerEngine` wraps those pool entries with `PlayerSlot` records. Activation updates `PlayerManager.active_indices[current_mode]`, so legacy `VideoSorter.player` and `audio_output` properties continue to point at the selected engine slot.
+`PlayerEngine` wraps those pool entries with `PlayerSlot` records. Activation records a watch session with the active slot id, path, generation, and originating view mode. `VideoSorter.player` and `audio_output` resolve through that active watch session first, so playback controls keep targeting the watched video even when the visible list mode changes.
 
 ## Selection Rules
 
@@ -34,15 +34,23 @@ READY preloads are revealed immediately when promoted. New loads remain hidden u
 
 ## Mode Switching
 
-`switch_mode(target_mode)` releases all players in the old pool by:
+Visible menu mode and active playback are separate.
 
-- stopping playback,
-- clearing the media source,
-- hiding the video item,
-- muting audio,
-- clearing the loaded path.
+`switch_mode(target_mode, preserve_current=True)` is passive by default:
 
-It then changes `current_mode` and unblocks signals on the target mode's active player.
+- it changes the visible player/list mode,
+- it does not stop the active watch player,
+- it does not clear the active watch media source,
+- it does not auto-play row 0 in the target list.
+
+Explicit destructive paths still release media handles:
+
+- `PlayerEngine.clear_all()` for full reset, folder context replacement, and app shutdown,
+- `PlayerEngine.clear_path(path)` before hard delete or rename,
+- `PlayerManager.cleanup()` on app close,
+- `PlayerManager.stop_and_release_path(path)` as a legacy fallback.
+
+A/B tag, highlight, trash, and search views rebuild candidate lists while the watch session continues until the user explicitly activates another video or the active file is invalidated.
 
 ## Loaded File Release
 
