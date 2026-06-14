@@ -111,7 +111,7 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\run_checks.ps1
 ```
 
-- Verified result on 2026-06-15: 192 unittests pass, compileall passes, source GUI startup smoke passes, release audit passes, synthetic scan/cache smoke passes, root import smoke and cross-CWD import smoke pass, `tools/run_checks.ps1` exits 0.
+- Verified result on 2026-06-15: 203 unittests pass, compileall passes, source GUI startup smoke passes, release audit passes, synthetic scan/cache smoke passes, root import smoke and cross-CWD import smoke pass, `tools/run_checks.ps1` exits 0.
 - Verified release build on 2026-06-14: `tools\package_smoke.ps1` creates a clean temporary venv using `requirements-lock.txt`, isolated PyInstaller `--workpath`/`--distpath`, and packaged startup smoke from a non-repository working directory; it exits 0 and cleans its temporary build output.
 - Verified scripted video workflow on 2026-06-14: `.\.venv\Scripts\python.exe .\tools\smoke_video_workflow.py` generated two temporary H.264 MP4 files and exited with `video workflow smoke ok`.
 - Verified synthetic large-library smoke on 2026-06-12: `.\.venv\Scripts\python.exe .\tools\perf_scan_smoke.py` generated 800 placeholder video files and exited with `PERF_SCAN_SMOKE_OK`.

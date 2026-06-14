@@ -1301,7 +1301,7 @@ Rerun tools/run_checks.ps1 after all focused failures are resolved.
 
 - [ ] **Step 3: Update automated test count docs when the count changes**
 
-If `tools/run_checks.ps1` reports a new unittest count and a static test asserts the old count, update the count in the relevant docs. The current known count after the continuity implementation is `192`.
+If `tools/run_checks.ps1` reports a new unittest count and a static test asserts the old count, update the count in the relevant docs. The current known count after the directional preload implementation is `203`.
 
 - [ ] **Step 4: Commit verification/doc-count changes**
 

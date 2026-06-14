@@ -52,6 +52,23 @@ Explicit destructive paths still release media handles:
 
 A/B tag, highlight, trash, and search views rebuild candidate lists while the watch session continues until the user explicitly activates another video or the active file is invalidated.
 
+## Directional Preload
+
+Player Engine v4 keeps balanced preload behavior until explicit playback movement shows a repeated direction:
+
+- first play, jumps, replays, and direction changes keep `current + next + previous`;
+- repeated forward movement keeps `current + next + next2` when slots allow;
+- repeated backward movement keeps `current + previous + previous2` when slots allow.
+
+The direction hint is produced only by explicit playback activation. Passive list refreshes for A/B tags, highlight, trash, and search do not change preload direction or replace the active watch session. If the active watch path is visible after a passive refresh, the engine replans neighboring preloads around that row without calling `play_video(...)`.
+
+Planner safety rules still apply:
+
+- source reuse requires the actual `QMediaPlayer.source()` to match the target path;
+- stale `READY` slots can be repurposed in the same planning pass when they block the new target window;
+- same-source neighbors can survive generation changes by repairing metadata instead of reloading;
+- mismatched `PRELOADING` status signals cannot mark a slot `READY`.
+
 ## Loaded File Release
 
 Before hard-delete or other physical file operations, callers should use `PlayerEngine.clear_path(path)`. It scans every engine slot and, for matching normalized paths or matching actual player sources:
