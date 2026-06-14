@@ -70,7 +70,9 @@ class FileActionController:
             return
         
         # 1. 플레이어 잠금 해제
-        if hasattr(self.app, 'player_manager'):
+        if hasattr(self.app, 'player_engine'):
+            self.app.player_engine.clear_path(path)
+        elif hasattr(self.app, 'player_manager'):
             self.app.player_manager.stop_and_release_path(path)
         
         # 2. 파일 삭제 실행
@@ -129,7 +131,10 @@ class FileActionController:
                 for item in trash_list
                 if isinstance(item, dict) and item.get('path')
             ]
-            if hasattr(self.app, 'player_manager'):
+            if hasattr(self.app, 'player_engine'):
+                for path in trash_paths:
+                    self.app.player_engine.clear_path(path)
+            elif hasattr(self.app, 'player_manager'):
                 for path in trash_paths:
                     self.app.player_manager.stop_and_release_path(path)
 

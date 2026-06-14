@@ -89,6 +89,15 @@ class FakePlayerManager:
         return self.active_data
 
 
+class FakePlayerEngine:
+    def __init__(self):
+        self.cleared_paths = []
+
+    def clear_path(self, path):
+        self.cleared_paths.append(path)
+        return True
+
+
 class FakeLabel:
     def __init__(self):
         self.text = ""
@@ -229,6 +238,20 @@ class FileActionControllerTest(unittest.TestCase):
         self.assertEqual(app.trash_button_updates, 1)
         self.assertEqual(app.auto_play_rows, [0])
 
+    def test_hard_delete_uses_player_engine_path_release(self):
+        app = FakeApp("C:/videos/delete.mp4")
+        app.player_engine = FakePlayerEngine()
+        controller = FileActionController(app)
+
+        with patch(
+            "src.controllers.file_action_controller.ThemeMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            controller.hard_delete_file()
+
+        self.assertEqual(app.player_engine.cleared_paths, ["C:/videos/delete.mp4"])
+        self.assertEqual(app.player_manager.released_paths, [])
+
     def test_hard_delete_failure_keeps_list_item_and_does_not_advance_playback(self):
         class FailingFileManager(FakeFileManager):
             def hard_delete_by_path(self, path):
@@ -273,6 +296,25 @@ class FileActionControllerTest(unittest.TestCase):
         self.assertEqual(app.file_list.clear_count, 1)
         self.assertEqual(app.update_mode_count, 1)
         self.assertEqual(app.reset_count, 1)
+
+    def test_delete_all_trash_uses_player_engine_for_each_path(self):
+        paths = ["C:/videos/a.mp4", "C:/videos/b.mp4"]
+        app = FakeApp(paths[0], paths)
+        app.player_engine = FakePlayerEngine()
+        app.file_manager.trash_files = [
+            {"path": paths[0], "text": "a.mp4"},
+            {"path": paths[1], "text": "b.mp4"},
+        ]
+        controller = FileActionController(app)
+
+        with patch(
+            "src.controllers.file_action_controller.ThemeMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            controller.delete_all_trash_files()
+
+        self.assertEqual(app.player_engine.cleared_paths, paths)
+        self.assertEqual(app.player_manager.released_paths, [])
 
     def test_toggle_hash_mark_updates_ui_path_when_current_list_is_copy(self):
         old_path = os.path.normpath("C:/videos/a.mp4")

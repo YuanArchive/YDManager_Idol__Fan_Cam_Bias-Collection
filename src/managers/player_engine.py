@@ -211,6 +211,21 @@ class PlayerEngine:
         self.active_slot_id = None
         self.current_generation = 0
 
+    def clear_path(self, path: str) -> bool:
+        norm_path = self._normalize_path(path)
+        cleared = False
+        for slot in self.slots:
+            expected_matches = (
+                slot.expected_path is not None
+                and os.path.normcase(os.path.normpath(slot.expected_path)) == os.path.normcase(norm_path)
+            )
+            if expected_matches or source_matches_path(slot, norm_path):
+                slot.clear()
+                if slot.slot_id == self.active_slot_id:
+                    self.active_slot_id = None
+                cleared = True
+        return cleared
+
     def activate(self, path: str, start_pos: int, generation: int, autoplay: bool) -> ActivationResult:
         norm_path = self._normalize_path(path)
         self.current_generation = generation
