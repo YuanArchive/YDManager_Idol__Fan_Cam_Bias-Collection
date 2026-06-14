@@ -267,14 +267,45 @@ class FakePlaybackEngine:
         self.activate_calls.append((path, start_pos, generation, autoplay, view_origin))
         return type("ActivationResult", (), {"slot_id": 0, "waiting_for_media": False})()
 
-    def plan_neighbors(self, current_index, playlist, generation):
-        self.plan_calls.append((current_index, [(item.path, item.start_pos) for item in playlist], generation))
+    def plan_neighbors(self, current_index, playlist, generation, preferred_direction=0):
+        self.plan_calls.append(
+            (
+                current_index,
+                [(item.path, item.start_pos) for item in playlist],
+                generation,
+                preferred_direction,
+            )
+        )
 
     def clear_all(self):
         self.clear_all_count += 1
 
 
 class PlayerEngineIntegrationTest(unittest.TestCase):
+    def _make_direction_window(self):
+        window = type("FakeWindow", (), {"setWindowTitle": lambda self, title: setattr(self, "title", title)})()
+        window.file_list = FakePlayableList()
+        window.scan_timer = FakeTimer()
+        window.preload_timer = FakeTimer()
+        window.seek_safety_timer = FakeTimer()
+        window.is_waiting_for_seek = False
+        window.chk_random = FakeCheck(False)
+        window.chk_autoscan = FakeCheck(False)
+        window.conf_auto_play = True
+        window.conf_privacy_mode = False
+        window.playback_generation = 0
+        window.player_engine = FakePlaybackEngine()
+        window.video_view = FakeVideoView()
+        window.player = FakeLoadPlayer()
+        window.playback_rate = 1.0
+        window._last_media_failure_key = None
+        window._prepare_playback = lambda index: VideoSorter._prepare_playback(window, index)
+        window._resolve_start_pos = lambda item, specific_pos: VideoSorter._resolve_start_pos(window, item, specific_pos)
+        window._current_playlist_items = lambda: VideoSorter._current_playlist_items(window)
+        window._increment_playback_generation = lambda: VideoSorter._increment_playback_generation(window)
+        window._preload_direction_for_index = lambda index: VideoSorter._preload_direction_for_index(window, index)
+        return window
+
     def test_play_video_delegates_activation_and_neighbor_planning_with_new_generation(self):
         window = type("FakeWindow", (), {"setWindowTitle": lambda self, title: setattr(self, "title", title)})()
         window.file_list = FakePlayableList()
@@ -296,6 +327,7 @@ class PlayerEngineIntegrationTest(unittest.TestCase):
         window._resolve_start_pos = lambda item, specific_pos: VideoSorter._resolve_start_pos(window, item, specific_pos)
         window._current_playlist_items = lambda: VideoSorter._current_playlist_items(window)
         window._increment_playback_generation = lambda: VideoSorter._increment_playback_generation(window)
+        window._preload_direction_for_index = lambda index: VideoSorter._preload_direction_for_index(window, index)
 
         VideoSorter.play_video(window, 1)
 
@@ -313,9 +345,38 @@ class PlayerEngineIntegrationTest(unittest.TestCase):
                         ("C:/videos/c.mp4", 0),
                     ],
                     6,
+                    0,
                 )
             ],
         )
+
+    def test_play_video_uses_balanced_preload_until_direction_streak_repeats(self):
+        window = self._make_direction_window()
+
+        VideoSorter.play_video(window, 0)
+        VideoSorter.play_video(window, 1)
+
+        self.assertEqual(window.player_engine.plan_calls[0][3], 0)
+        self.assertEqual(window.player_engine.plan_calls[1][3], 0)
+
+    def test_play_video_passes_forward_direction_after_repeated_forward_moves(self):
+        window = self._make_direction_window()
+
+        VideoSorter.play_video(window, 0)
+        VideoSorter.play_video(window, 1)
+        VideoSorter.play_video(window, 2)
+
+        self.assertEqual(window.player_engine.plan_calls[-1][3], 1)
+
+    def test_play_video_resets_direction_after_reverse_move(self):
+        window = self._make_direction_window()
+
+        VideoSorter.play_video(window, 0)
+        VideoSorter.play_video(window, 1)
+        VideoSorter.play_video(window, 2)
+        VideoSorter.play_video(window, 1)
+
+        self.assertEqual(window.player_engine.plan_calls[-1][3], 0)
 
     def test_auto_play_next_blocks_selection_signal_before_explicit_play(self):
         window = type("FakeWindow", (), {})()
@@ -467,6 +528,54 @@ class PassiveListRefreshTest(unittest.TestCase):
 
         self.assertEqual(window.file_list.current_row, 0)
         self.assertEqual(window.play_calls, [])
+
+    def test_preserve_list_refresh_replans_neighbors_for_visible_watch_without_playing(self):
+        class Engine:
+            def __init__(self):
+                self.plan_calls = []
+
+            def active_session(self):
+                return type("Session", (), {"path": "C:/videos/b.mp4", "generation": 9})()
+
+            def plan_neighbors(self, current_index, playlist, generation, preferred_direction=0):
+                self.plan_calls.append(
+                    (
+                        current_index,
+                        [(item.path, item.start_pos) for item in playlist],
+                        generation,
+                        preferred_direction,
+                    )
+                )
+
+        window = type("FakeWindow", (), {})()
+        window.file_list = FakeSelectableList(["C:/videos/a.mp4", "C:/videos/b.mp4", "C:/videos/c.mp4"])
+        window.play_calls = []
+        window.last_main_path = None
+        window.last_main_row = 0
+        window.chk_random = FakeCheck(False)
+        window.player_engine = Engine()
+        window.play_video = lambda row, specific_start_pos=None: window.play_calls.append((row, specific_start_pos))
+        window._current_playlist_items = lambda: VideoSorter._current_playlist_items(window)
+
+        VideoSorter._maybe_activate_after_list_refresh(window, "main", "preserve")
+
+        self.assertEqual(window.file_list.current_row, 1)
+        self.assertEqual(window.play_calls, [])
+        self.assertEqual(
+            window.player_engine.plan_calls,
+            [
+                (
+                    1,
+                    [
+                        ("C:/videos/a.mp4", 0),
+                        ("C:/videos/b.mp4", 0),
+                        ("C:/videos/c.mp4", 0),
+                    ],
+                    9,
+                    0,
+                )
+            ],
+        )
 
     def test_change_view_mode_requests_preserve_refresh(self):
         class FileManager:
@@ -1307,6 +1416,45 @@ class VideoSorterSearchTest(unittest.TestCase):
         self.assertTrue(window.load_force_scan)
         self.assertEqual(window.root_folder, "C:/videos")
         self.assertEqual(window.player_manager.stopped_mode, "main")
+
+    def test_folder_history_click_clears_engine_session_before_loading_new_folder(self):
+        class FakeItem:
+            def data(self, role):
+                if role == Qt.ItemDataRole.UserRole:
+                    return "C:/videos"
+                return None
+
+        class FakeEngine:
+            def __init__(self):
+                self.clear_all_count = 0
+
+            def clear_all(self):
+                self.clear_all_count += 1
+
+        class FakePlayerManager:
+            def stop_all_in_mode(self, mode):
+                self.stopped_mode = mode
+
+        class FakeFolderList:
+            def setFocus(self):
+                self.focused = True
+
+        class FakeWindow:
+            def load_files(self, force_scan=False):
+                self.load_force_scan = force_scan
+
+        window = FakeWindow()
+        window.player_engine = FakeEngine()
+        window.player_manager = FakePlayerManager()
+        window.folder_list_widget = FakeFolderList()
+        window.lbl_info = FakeLabel()
+
+        with patch("main.os.path.isdir", return_value=True):
+            VideoSorter.on_folder_history_clicked(window, FakeItem())
+
+        self.assertEqual(window.player_engine.clear_all_count, 1)
+        self.assertFalse(hasattr(window.player_manager, "stopped_mode"))
+        self.assertTrue(window.load_force_scan)
 
     def test_shift_release_inside_search_does_not_refocus_search(self):
         class FakeWindow:

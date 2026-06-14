@@ -206,6 +206,31 @@ class VideoSorter(QMainWindow):
     def _increment_playback_generation(self) -> None:
         self.playback_generation = getattr(self, "playback_generation", 0) + 1
 
+    def _preload_direction_for_index(self, index: int) -> int:
+        previous_index = getattr(self, "last_playback_index", None)
+        previous_direction = getattr(self, "last_navigation_direction", 0)
+        previous_streak = getattr(self, "navigation_direction_streak", 0)
+
+        direction = 0
+        if isinstance(previous_index, int):
+            if index > previous_index:
+                direction = 1
+            elif index < previous_index:
+                direction = -1
+
+        if direction == 0:
+            streak = 0
+        elif direction == previous_direction:
+            streak = previous_streak + 1
+        else:
+            streak = 1
+
+        self.last_playback_index = index
+        self.last_navigation_direction = direction
+        self.navigation_direction_streak = streak
+
+        return direction if streak >= 2 else 0
+
     def _current_playlist_items(self) -> List[PlaybackItem]:
         items = []
         random_start = self.chk_random.isChecked()
@@ -278,6 +303,7 @@ class VideoSorter(QMainWindow):
 
         target_row = VideoSorter._candidate_row_for_target_mode(self, target_mode)
         VideoSorter._select_candidate_row(self, target_row)
+        VideoSorter._replan_preloads_for_visible_watch(self)
 
         if activation_policy == "preserve":
             return
@@ -289,6 +315,27 @@ class VideoSorter(QMainWindow):
             self.play_video(target_row, specific_start_pos=start_pos)
         else:
             self.play_video(target_row)
+
+    def _replan_preloads_for_visible_watch(self) -> bool:
+        if not hasattr(self, "player_engine"):
+            return False
+        if not hasattr(self.player_engine, "plan_neighbors"):
+            return False
+        session = VideoSorter._active_watch_session(self)
+        session_path = getattr(session, "path", None)
+        if not session_path:
+            return False
+        row = VideoSorter._row_for_path(self, session_path)
+        if row < 0:
+            return False
+        generation = getattr(session, "generation", getattr(self, "playback_generation", 0))
+        self.player_engine.plan_neighbors(
+            row,
+            VideoSorter._current_playlist_items(self),
+            generation,
+            preferred_direction=0,
+        )
+        return True
 
     def set_window_icon(self) -> None:
         """애플리케이션 아이콘 및 Windows AppID 설정"""
@@ -880,7 +927,13 @@ class VideoSorter(QMainWindow):
         result = self.player_engine.activate(target_path, start_pos, generation, autoplay)
         self.player.setPlaybackRate(self.playback_rate)
         self.is_waiting_for_seek = result.waiting_for_media
-        self.player_engine.plan_neighbors(index, self._current_playlist_items(), generation)
+        preload_direction = self._preload_direction_for_index(index)
+        self.player_engine.plan_neighbors(
+            index,
+            self._current_playlist_items(),
+            generation,
+            preferred_direction=preload_direction,
+        )
 
         if autoplay and self.chk_autoscan.isChecked():
             self.scan_timer.start()
@@ -1292,11 +1345,17 @@ class VideoSorter(QMainWindow):
         full_path = item.data(Qt.ItemDataRole.UserRole)
         
         if os.path.isdir(full_path):
-            self.player_manager.stop_all_in_mode('main')
+            if hasattr(self, "player_engine"):
+                self.player_engine.clear_all()
+            else:
+                self.player_manager.stop_all_in_mode('main')
             
             self.last_main_row = 0
             self.last_main_pos = 0
             self.last_main_path = None 
+            self.last_playback_index = None
+            self.last_navigation_direction = 0
+            self.navigation_direction_streak = 0
             self.target_start_pos = 0
             
             self.root_folder = full_path
