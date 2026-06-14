@@ -283,3 +283,67 @@ class PlayerEngine:
                 continue
             if slot.state in {SlotState.PRELOADING, SlotState.READY, SlotState.STALE, SlotState.FAILED}:
                 slot.clear()
+
+    def _slot_for_player(self, player):
+        for slot in self.slots:
+            if slot.player is player:
+                return slot
+        return None
+
+    def _status_name(self, status) -> str:
+        return getattr(status, "name", str(status)).lower()
+
+    def _is_loaded_status(self, status) -> bool:
+        name = self._status_name(status)
+        return "loaded" in name or "buffered" in name
+
+    def _is_failed_status(self, status) -> bool:
+        name = self._status_name(status)
+        return "invalid" in name or "nomedia" in name or name == "none"
+
+    def reveal_if_allowed(self, slot, status, fallback_expired: bool = False) -> bool:
+        if slot.state != SlotState.ACTIVE:
+            return False
+        if slot.expected_generation != self.current_generation:
+            return False
+        if not slot.expected_path or not source_matches_path(slot, slot.expected_path):
+            return False
+        if self.privacy_guard():
+            return False
+        if not fallback_expired and not self._is_loaded_status(status):
+            return False
+        slot.video_item.setOpacity(1.0)
+        slot.video_item.setZValue(20.0)
+        return True
+
+    def _mark_failed(self, slot, status) -> None:
+        slot.last_status = status
+        slot.last_error = self._status_name(status)
+        slot.player.stop()
+        slot.player.setSource(_empty_qurl())
+        slot.audio.setMuted(True)
+        slot.video_item.setOpacity(0.0)
+        slot.video_item.setZValue(0.0)
+        slot.expected_path = None
+        slot.expected_generation = 0
+        slot.requested_start_pos = 0
+        slot.state = SlotState.FAILED
+        slot.role = SlotRole.SPARE
+
+    def handle_media_status(self, player, status) -> bool:
+        slot = self._slot_for_player(player)
+        if slot is None:
+            return False
+        slot.last_status = status
+        if self._is_failed_status(status):
+            self._mark_failed(slot, status)
+            return False
+        if slot.state == SlotState.PRELOADING and self._is_loaded_status(status):
+            slot.state = SlotState.READY
+            return False
+        if slot.state == SlotState.ACTIVE:
+            revealed = self.reveal_if_allowed(slot, status)
+            if revealed:
+                self.fallback_timer.stop()
+            return revealed
+        return False

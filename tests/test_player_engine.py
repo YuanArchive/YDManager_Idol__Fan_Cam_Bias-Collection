@@ -285,5 +285,60 @@ class PlayerEnginePreloadPlanTest(unittest.TestCase):
         self.assertEqual(spare.expected_path, os.path.normpath("C:/videos/c.mp4"))
 
 
+class MediaStatus:
+    LoadedMedia = "loaded"
+    BufferedMedia = "buffered"
+    LoadingMedia = "loading"
+    InvalidMedia = "invalid"
+    NoMedia = "none"
+    EndOfMedia = "end"
+
+
+class PlayerEngineStatusTest(unittest.TestCase):
+    def test_ready_preload_survives_active_loaded_status(self):
+        active = make_slot(0, "C:/videos/a.mp4", SlotState.ACTIVE, 3, SlotRole.CURRENT)
+        ready_next = make_slot(1, "C:/videos/b.mp4", SlotState.READY, 3, SlotRole.NEXT)
+        engine = make_engine([active, ready_next])
+
+        engine.handle_media_status(active.player, MediaStatus.LoadedMedia)
+
+        self.assertEqual(ready_next.state, SlotState.READY)
+        self.assertEqual(ready_next.player.stop_count, 0)
+
+    def test_reveal_requires_active_generation_source_and_privacy_clear(self):
+        active = make_slot(0, "C:/videos/a.mp4", SlotState.ACTIVE, 3, SlotRole.CURRENT)
+        engine = make_engine([active], privacy_blocked=True)
+        engine.current_generation = 3
+
+        revealed = engine.reveal_if_allowed(active, MediaStatus.LoadedMedia)
+
+        self.assertFalse(revealed)
+        self.assertEqual(active.video_item.opacity, 0.0)
+
+    def test_invalid_media_marks_slot_failed_and_clears_reuse_metadata(self):
+        active = make_slot(0, "C:/videos/broken.mp4", SlotState.ACTIVE, 3, SlotRole.CURRENT)
+        engine = make_engine([active])
+        engine.current_generation = 3
+
+        engine.handle_media_status(active.player, MediaStatus.InvalidMedia)
+
+        self.assertEqual(active.state, SlotState.FAILED)
+        self.assertIsNone(active.expected_path)
+        self.assertEqual(active.video_item.opacity, 0.0)
+        self.assertTrue(active.audio.muted)
+
+    def test_loaded_active_reveals_screen_and_stops_fallback_timer(self):
+        active = make_slot(0, "C:/videos/a.mp4", SlotState.ACTIVE, 3, SlotRole.CURRENT)
+        engine = make_engine([active])
+        engine.current_generation = 3
+        engine.fallback_timer.start()
+
+        revealed = engine.handle_media_status(active.player, MediaStatus.LoadedMedia)
+
+        self.assertTrue(revealed)
+        self.assertEqual(active.video_item.opacity, 1.0)
+        self.assertTrue(engine.fallback_timer.stopped)
+
+
 if __name__ == "__main__":
     unittest.main()
