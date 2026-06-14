@@ -37,6 +37,17 @@ class ActivationResult:
     fallback_required: bool
 
 
+@dataclass(frozen=True)
+class WatchSession:
+    path: str
+    slot_id: int
+    generation: int
+    view_origin: str
+    requested_start_pos: int
+    last_known_position: int = 0
+    preserve_across_menu: bool = True
+
+
 @dataclass
 class PlayerSlot:
     slot_id: int
@@ -133,6 +144,7 @@ class PlayerEngine:
         self.activate_slot_callback = activate_slot_callback
         self.active_slot_id = None
         self.current_generation = 0
+        self.watch_session: WatchSession | None = None
 
     def _normalize_path(self, path: str) -> str:
         return os.path.normpath(path)
@@ -204,12 +216,16 @@ class PlayerEngine:
         slot = self.active_slot()
         return slot.audio if slot else None
 
+    def active_session(self):
+        return self.watch_session
+
     def clear_all(self) -> None:
         self.fallback_timer.stop()
         for slot in self.slots:
             slot.clear()
         self.active_slot_id = None
         self.current_generation = 0
+        self.watch_session = None
 
     def clear_path(self, path: str) -> bool:
         norm_path = self._normalize_path(path)
@@ -223,10 +239,23 @@ class PlayerEngine:
                 slot.clear()
                 if slot.slot_id == self.active_slot_id:
                     self.active_slot_id = None
+                    self.watch_session = None
+                elif (
+                    self.watch_session is not None
+                    and os.path.normcase(os.path.normpath(self.watch_session.path)) == os.path.normcase(norm_path)
+                ):
+                    self.watch_session = None
                 cleared = True
         return cleared
 
-    def activate(self, path: str, start_pos: int, generation: int, autoplay: bool) -> ActivationResult:
+    def activate(
+        self,
+        path: str,
+        start_pos: int,
+        generation: int,
+        autoplay: bool,
+        view_origin: str = "",
+    ) -> ActivationResult:
         norm_path = self._normalize_path(path)
         self.current_generation = generation
         slot = self._find_valid_slot(norm_path, generation)
@@ -257,6 +286,13 @@ class PlayerEngine:
         slot.video_item.setZValue(20.0)
         slot.player.blockSignals(False)
         self.active_slot_id = slot.slot_id
+        self.watch_session = WatchSession(
+            path=norm_path,
+            slot_id=slot.slot_id,
+            generation=generation,
+            view_origin=view_origin or getattr(slot, "mode", ""),
+            requested_start_pos=start_pos,
+        )
         if self.activate_slot_callback:
             self.activate_slot_callback(slot)
 

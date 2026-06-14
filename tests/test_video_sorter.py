@@ -227,8 +227,8 @@ class FakePlaybackEngine:
         self.plan_calls = []
         self.clear_all_count = 0
 
-    def activate(self, path, start_pos, generation, autoplay):
-        self.activate_calls.append((path, start_pos, generation, autoplay))
+    def activate(self, path, start_pos, generation, autoplay, view_origin=""):
+        self.activate_calls.append((path, start_pos, generation, autoplay, view_origin))
         return type("ActivationResult", (), {"slot_id": 0, "waiting_for_media": False})()
 
     def plan_neighbors(self, current_index, playlist, generation):
@@ -265,7 +265,7 @@ class PlayerEngineIntegrationTest(unittest.TestCase):
 
         self.assertEqual(window.playback_generation, 6)
         self.assertIsNone(window._last_media_failure_key)
-        self.assertEqual(window.player_engine.activate_calls, [("C:/videos/b.mp4", 2000, 6, True)])
+        self.assertEqual(window.player_engine.activate_calls, [("C:/videos/b.mp4", 2000, 6, True, "")])
         self.assertEqual(
             window.player_engine.plan_calls,
             [

@@ -7,6 +7,7 @@ from src.managers.player_engine import (
     PlayerSlot,
     SlotRole,
     SlotState,
+    WatchSession,
 )
 
 
@@ -230,6 +231,37 @@ class PlayerEngineActivationTest(unittest.TestCase):
 
         self.assertEqual(entry["path"], os.path.normpath("C:/videos/a.mp4"))
         self.assertEqual(activated, [("main", 2)])
+
+    def test_activate_records_watch_session_metadata(self):
+        slot = make_slot(0)
+        engine = make_engine([slot])
+
+        result = engine.activate(
+            "C:/videos/a.mp4",
+            start_pos=1200,
+            generation=4,
+            autoplay=True,
+            view_origin="main",
+        )
+
+        session = engine.active_session()
+        self.assertIsInstance(session, WatchSession)
+        self.assertEqual(session.path, os.path.normpath("C:/videos/a.mp4"))
+        self.assertEqual(session.slot_id, result.slot_id)
+        self.assertEqual(session.generation, 4)
+        self.assertEqual(session.view_origin, "main")
+        self.assertEqual(session.requested_start_pos, 1200)
+
+    def test_clear_path_clears_active_watch_session(self):
+        slot = make_slot(0)
+        engine = make_engine([slot])
+        engine.activate("C:/videos/a.mp4", start_pos=0, generation=1, autoplay=True, view_origin="main")
+
+        cleared = engine.clear_path("C:/videos/a.mp4")
+
+        self.assertTrue(cleared)
+        self.assertIsNone(engine.active_session())
+        self.assertIsNone(engine.active_player())
 
     def test_activation_uses_only_current_mode_slots(self):
         trash_slot = PlayerSlot(
