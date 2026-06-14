@@ -51,6 +51,21 @@ class CleanupStaticTest(unittest.TestCase):
 
         self.assertNotIn("QUrl.fromLocalFile", source)
 
+    def test_thumbnail_subsystem_does_not_load_qmediaplayer_sources(self):
+        paths = [
+            ROOT / "src" / "managers" / "thumbnail_manager.py",
+            ROOT / "src" / "core" / "thumbnail_threads.py",
+            ROOT / "src" / "ui" / "thumbnail_rail.py",
+        ]
+        forbidden = ["setSource(", "QMediaPlayer", "QUrl.fromLocalFile"]
+
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertTrue(path.exists())
+                source = path.read_text(encoding="utf-8")
+                for token in forbidden:
+                    self.assertNotIn(token, source)
+
 
 if __name__ == "__main__":
     unittest.main()

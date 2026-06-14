@@ -193,6 +193,33 @@ class FakeVideoView:
     def set_position(self, position):
         self.position = position
 
+    def set_privacy_screen(self, enabled):
+        self.privacy_screen = enabled
+
+
+class FakeThumbnailRail:
+    def __init__(self):
+        self.position = None
+        self.privacy_values = []
+
+    def set_playback_position(self, position):
+        self.position = position
+
+    def set_privacy_hidden(self, hidden):
+        self.privacy_values.append(hidden)
+
+
+class FakeSplitter:
+    def __init__(self):
+        self.hidden = False
+        self.shown = False
+
+    def hide(self):
+        self.hidden = True
+
+    def show(self):
+        self.shown = True
+
 
 class FakeVideoItem:
     def __init__(self):
@@ -1076,6 +1103,52 @@ class PlayerEngineSignalHandlerTest(unittest.TestCase):
         VideoSorter.on_position_changed(window, 2000)
 
         self.assertIsNone(window.video_view.position)
+
+    def test_position_changed_updates_thumbnail_rail_marker(self):
+        active_player = FakeDurationPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {"sender": lambda self: active_player},
+        )()
+        window.player_engine = FakeStatusEngine(active_player)
+        window.player = active_player
+        window.video_view = FakeVideoView()
+        window.thumbnail_rail = FakeThumbnailRail()
+        window.is_waiting_for_seek = False
+
+        VideoSorter.on_position_changed(window, 2000)
+
+        self.assertEqual(window.video_view.position, 2000)
+        self.assertEqual(window.thumbnail_rail.position, 2000)
+
+    def test_privacy_visibility_updates_thumbnail_rail(self):
+        class Source:
+            def toLocalFile(self):
+                return "C:/videos/a.mp4"
+
+        class Player:
+            def source(self):
+                return Source()
+
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "setWindowTitle": lambda self, title: setattr(self, "title", title),
+                "setFocus": lambda self: setattr(self, "focused", True),
+            },
+        )()
+        window.conf_privacy_mode = True
+        window.splitter = FakeSplitter()
+        window.video_view = FakeVideoView()
+        window.thumbnail_rail = FakeThumbnailRail()
+        window.player = Player()
+
+        VideoSorter._apply_privacy_visibility(window, False)
+        VideoSorter._apply_privacy_visibility(window, True)
+
+        self.assertEqual(window.thumbnail_rail.privacy_values, [True, False])
 
     def test_force_show_screen_uses_engine_reveal_guard(self):
         slot = type("FakeSlot", (), {"last_status": "loading"})()

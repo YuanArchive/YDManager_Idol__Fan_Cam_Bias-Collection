@@ -831,6 +831,8 @@ class VideoSorter(QMainWindow):
         """프라이버시 모드 시 UI와 타이틀 바의 파일명을 모두 숨깁니다."""
         is_privacy_on = getattr(self, 'conf_privacy_mode', False)
         privacy_active = is_privacy_on and not is_playing
+        if hasattr(self, "thumbnail_rail"):
+            self.thumbnail_rail.set_privacy_hidden(privacy_active)
 
         if privacy_active:
             # 1. UI 및 마우스 차단
@@ -1153,6 +1155,8 @@ class VideoSorter(QMainWindow):
         if active_player is None or active_player.duration() <= 0:
             return
         self.video_view.set_position(position)
+        if hasattr(self, "thumbnail_rail"):
+            self.thumbnail_rail.set_playback_position(position)
         
         if self.is_waiting_for_seek:
             target = getattr(self, '_pending_seek_pos', -1)

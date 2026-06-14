@@ -3,6 +3,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import QApplication
 
 from src.ui.thumbnail_rail import (
@@ -60,6 +61,39 @@ class ThumbnailPreviewRailWidgetTest(unittest.TestCase):
         self.widget.activate_cell_for_test(3)
 
         self.assertEqual(emitted, [3000])
+
+    def test_hover_preview_uses_double_scale_without_resizing_rail(self):
+        self.widget = ThumbnailPreviewRailWidget()
+        self.widget.resize(120, 480)
+        self.widget.set_cells([
+            ThumbnailCell(index=i, timestamp_ms=i * 1000, image_path=None, state="ready")
+            for i in range(12)
+        ])
+        original_size = self.widget.size()
+
+        self.widget.update_hover_position(QPoint(60, 85))
+
+        cell_rect = self.widget.cell_rect(2)
+        preview_rect = self.widget.hover_preview_rect()
+        self.assertEqual(self.widget.hovered_cell_index, 2)
+        self.assertEqual(preview_rect.width(), cell_rect.width() * 2)
+        self.assertEqual(preview_rect.height(), cell_rect.height() * 2)
+        self.assertEqual(self.widget.size(), original_size)
+
+    def test_privacy_hidden_clears_hover_preview(self):
+        self.widget = ThumbnailPreviewRailWidget()
+        self.widget.resize(120, 480)
+        self.widget.set_cells([
+            ThumbnailCell(index=i, timestamp_ms=i * 1000, image_path=None, state="ready")
+            for i in range(12)
+        ])
+        self.widget.update_hover_position(QPoint(60, 85))
+
+        self.widget.set_privacy_hidden(True)
+
+        self.assertTrue(self.widget.privacy_hidden)
+        self.assertIsNone(self.widget.hovered_cell_index)
+        self.assertIsNone(self.widget.hover_preview_rect())
 
 
 class ThumbnailMarkerTest(unittest.TestCase):
