@@ -36,6 +36,13 @@ class ThumbnailTimelineManager:
             return {}
         return data if isinstance(data, dict) else {}
 
+    def _save_manifest(self) -> None:
+        os.makedirs(os.path.dirname(self.manifest_path), exist_ok=True)
+        temp_path = f"{self.manifest_path}.tmp"
+        with open(temp_path, "w", encoding="utf-8") as file:
+            json.dump(self.manifest, file, ensure_ascii=False, indent=2)
+        os.replace(temp_path, self.manifest_path)
+
     def is_manifest_record_valid(self, path: str, record: dict | None) -> bool:
         if not isinstance(record, dict):
             return False
@@ -84,6 +91,35 @@ class ThumbnailTimelineManager:
             [cell.quality_score for cell in cells],
             duration_ms=duration_ms,
         )
+
+    def record_completed_timeline(
+        self,
+        path: str,
+        duration_ms: int,
+        cache_id: str,
+        timestamps_ms: list[int],
+        files: list[str],
+        quality_scores: list[float],
+    ) -> None:
+        if len(timestamps_ms) != 12 or len(files) != 12:
+            return
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return
+
+        self.manifest[self._path_key(path)] = {
+            "path": path,
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+            "duration_ms": int(duration_ms),
+            "thumb_count": 12,
+            "cache_id": cache_id,
+            "timestamps_ms": [int(value) for value in timestamps_ms],
+            "quality_scores": [float(value) for value in quality_scores],
+            "files": list(files),
+        }
+        self._save_manifest()
 
     def request_timeline(
         self,

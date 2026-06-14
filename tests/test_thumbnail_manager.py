@@ -112,3 +112,27 @@ class ThumbnailTimelineManagerTest(unittest.TestCase):
         manager = ThumbnailTimelineManager()
 
         self.assertEqual(manager.best_random_start(path, duration_ms=120000), 40000)
+
+    def test_record_completed_timeline_persists_valid_manifest(self):
+        path = self.make_video()
+        cache_id = "abc"
+        os.makedirs(os.path.join(self.cache_dir, cache_id), exist_ok=True)
+        files = []
+        for index in range(12):
+            name = f"{index:03d}.jpg"
+            with open(os.path.join(self.cache_dir, cache_id, name), "wb") as file:
+                file.write(b"jpg")
+            files.append(name)
+        manager = ThumbnailTimelineManager()
+
+        manager.record_completed_timeline(
+            path=path,
+            duration_ms=120000,
+            cache_id=cache_id,
+            timestamps_ms=[i * 10000 for i in range(12)],
+            files=files,
+            quality_scores=[0.8 for _ in range(12)],
+        )
+        reloaded = ThumbnailTimelineManager()
+
+        self.assertEqual(len(reloaded.cached_cells(path)), 12)
