@@ -53,6 +53,8 @@ def setup_app_connections(window):
     
     # [8] Video View Inputs
     window.video_view.click_ratio_signal.connect(window.on_video_clicked)
+    if hasattr(window, "thumbnail_rail"):
+        window.thumbnail_rail.thumbnail_clicked.connect(window.seek_to_thumbnail)
     window.video_view.installEventFilter(window)
     
     # [9] Search Input (Korean IME & Event Filter)

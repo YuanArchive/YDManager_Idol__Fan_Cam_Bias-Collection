@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QAction
 from .ui_components import ProVideoView, PlaceholderListWidget, WatermarkListWidget
+from .thumbnail_rail import ThumbnailPreviewRailWidget
 from . import styles 
 import qtawesome as qta
 
@@ -256,13 +257,21 @@ def init_ui(window):
     right_layout.setContentsMargins(0, 0, 0, 0)
     right_layout.setSpacing(5)
     
+    player_row = QHBoxLayout()
+    player_row.setContentsMargins(0, 0, 0, 0)
+    player_row.setSpacing(5)
+
     window.video_view = ProVideoView()
+    window.thumbnail_rail = ThumbnailPreviewRailWidget()
+    window.thumbnail_rail.setFixedWidth(105)
     
     sp_video = window.video_view.sizePolicy()
     sp_video.setRetainSizeWhenHidden(True)
     window.video_view.setSizePolicy(sp_video)
     
-    right_layout.addWidget(window.video_view)
+    player_row.addWidget(window.video_view, 1)
+    player_row.addWidget(window.thumbnail_rail, 0)
+    right_layout.addLayout(player_row, 1)
 
     # --- 하단 컨트롤 버튼 ---
     window.btn_layout = QHBoxLayout()

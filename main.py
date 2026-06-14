@@ -371,9 +371,11 @@ class VideoSorter(QMainWindow):
         left_panel_w = 230
         target_video_w = 1305
         target_video_h = 720
+        thumbnail_rail_w = 110
+        target_right_w = target_video_w + thumbnail_rail_w
         extra_w, extra_h = 40, 80
         
-        total_w = left_panel_w + target_video_w + extra_w
+        total_w = left_panel_w + target_right_w + extra_w
         total_h = target_video_h + extra_h
         
         self.resize(total_w, total_h)
@@ -381,7 +383,7 @@ class VideoSorter(QMainWindow):
         self.set_window_icon()
         self.setWindowTitle("YDManager")
         
-        self.splitter.setSizes([left_panel_w, target_video_w])
+        self.splitter.setSizes([left_panel_w, target_right_w])
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         
@@ -977,6 +979,9 @@ class VideoSorter(QMainWindow):
             self.scan_timer.start()
         else:
             self.scan_timer.stop()
+
+    def seek_to_thumbnail(self, timestamp_ms: int) -> None:
+        self._execute_seek_and_play(int(timestamp_ms))
             
     def _force_show_screen(self):
         """탐색 지연 시 강제로 화면 표시"""

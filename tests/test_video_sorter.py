@@ -626,6 +626,22 @@ class WatchPathMatchingTest(unittest.TestCase):
         self.assertFalse(VideoSorter.is_active_watch_path(window, "C:/videos/b.mp4"))
 
 
+class ThumbnailPreviewCoordinatorTest(unittest.TestCase):
+    def test_thumbnail_seek_routes_through_guarded_seek(self):
+        class FakeWindow:
+            def __init__(self):
+                self.seek_calls = []
+
+            def _execute_seek_and_play(self, timestamp):
+                self.seek_calls.append(timestamp)
+
+        window = FakeWindow()
+
+        VideoSorter.seek_to_thumbnail(window, 42000)
+
+        self.assertEqual(window.seek_calls, [42000])
+
+
 class FakeStatusEngine:
     def __init__(self, active_player, revealed=True, active_path=None):
         self.active = active_player
