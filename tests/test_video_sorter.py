@@ -122,6 +122,42 @@ class FakePlayableList:
         self.block_history.append(blocked)
 
 
+class FakeSelectableItem:
+    def __init__(self, path):
+        self.path = path
+
+    def data(self, role):
+        if role == Qt.ItemDataRole.UserRole:
+            return self.path
+        return None
+
+
+class FakeSelectableList:
+    def __init__(self, paths):
+        self.items = [FakeSelectableItem(path) for path in paths]
+        self.current_row = -1
+        self.block_history = []
+        self.scrolled_to = None
+
+    def count(self):
+        return len(self.items)
+
+    def item(self, row):
+        return self.items[row]
+
+    def setCurrentRow(self, row):
+        self.current_row = row
+
+    def currentRow(self):
+        return self.current_row
+
+    def scrollToItem(self, item, hint=None):
+        self.scrolled_to = item
+
+    def blockSignals(self, blocked):
+        self.block_history.append(blocked)
+
+
 class FakeLabel:
     def __init__(self):
         self.text = ""
@@ -377,6 +413,60 @@ class PlayerPropertyRoutingTest(unittest.TestCase):
         window.player_manager = Manager()
 
         self.assertIs(VideoSorter.audio_output.fget(window), engine_audio)
+
+
+class PassiveListRefreshTest(unittest.TestCase):
+    def test_preserve_policy_selects_watch_path_without_playing(self):
+        window = type("FakeWindow", (), {})()
+        window.file_list = FakeSelectableList(["C:/videos/a.mp4", "C:/videos/b.mp4"])
+        window.play_calls = []
+        window.last_main_path = None
+        window.last_main_row = 0
+
+        class Engine:
+            def active_session(self):
+                return type("Session", (), {"path": os.path.normpath("C:/videos/b.mp4")})()
+
+        window.player_engine = Engine()
+        window.play_video = lambda row, specific_start_pos=None: window.play_calls.append((row, specific_start_pos))
+
+        VideoSorter._maybe_activate_after_list_refresh(window, "A", "preserve")
+
+        self.assertEqual(window.file_list.current_row, 1)
+        self.assertEqual(window.play_calls, [])
+
+    def test_auto_if_no_watch_plays_main_restored_row(self):
+        window = type("FakeWindow", (), {})()
+        window.file_list = FakeSelectableList(["C:/videos/a.mp4", "C:/videos/b.mp4"])
+        window.play_calls = []
+        window.last_main_path = "C:/videos/b.mp4"
+        window.last_main_row = 0
+        window.last_main_pos = 2400
+        window.player_engine = type("Engine", (), {"active_session": lambda self: None})()
+        window.play_video = lambda row, specific_start_pos=None: window.play_calls.append((row, specific_start_pos))
+
+        VideoSorter._maybe_activate_after_list_refresh(window, "main", "auto_if_no_watch")
+
+        self.assertEqual(window.file_list.current_row, 1)
+        self.assertEqual(window.play_calls, [(1, 2400)])
+
+    def test_auto_if_no_watch_preserves_when_watch_exists(self):
+        window = type("FakeWindow", (), {})()
+        window.file_list = FakeSelectableList(["C:/videos/a.mp4"])
+        window.play_calls = []
+        window.last_main_path = None
+        window.last_main_row = 0
+        window.player_engine = type(
+            "Engine",
+            (),
+            {"active_session": lambda self: type("Session", (), {"path": "C:/videos/a.mp4"})()},
+        )()
+        window.play_video = lambda row, specific_start_pos=None: window.play_calls.append((row, specific_start_pos))
+
+        VideoSorter._maybe_activate_after_list_refresh(window, "main", "auto_if_no_watch")
+
+        self.assertEqual(window.file_list.current_row, 0)
+        self.assertEqual(window.play_calls, [])
 
 
 class FakeStatusEngine:

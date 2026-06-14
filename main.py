@@ -221,6 +221,66 @@ class VideoSorter(QMainWindow):
             items.append(PlaybackItem(path=path, start_pos=start_pos))
         return items
 
+    def _active_watch_session(self):
+        if hasattr(self, "player_engine"):
+            return self.player_engine.active_session()
+        return None
+
+    def _has_active_watch_session(self) -> bool:
+        session = VideoSorter._active_watch_session(self)
+        return session is not None and bool(getattr(session, "path", None))
+
+    def _row_for_path(self, path: str | None) -> int:
+        if not path:
+            return -1
+        target = os.path.normcase(os.path.normpath(path))
+        for row in range(self.file_list.count()):
+            item = self.file_list.item(row)
+            if item is None:
+                continue
+            item_path = item.data(Qt.ItemDataRole.UserRole)
+            if item_path and os.path.normcase(os.path.normpath(item_path)) == target:
+                return row
+        return -1
+
+    def _select_candidate_row(self, row: int) -> None:
+        if row < 0 or row >= self.file_list.count():
+            return
+        self.file_list.setCurrentRow(row)
+        item = self.file_list.item(row)
+        if item is not None:
+            self.file_list.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+
+    def _candidate_row_for_target_mode(self, target_mode: str) -> int:
+        session = VideoSorter._active_watch_session(self)
+        session_row = VideoSorter._row_for_path(self, getattr(session, "path", None))
+        if session_row >= 0:
+            return session_row
+        if target_mode == "main":
+            path_row = VideoSorter._row_for_path(self, getattr(self, "last_main_path", None))
+            if path_row >= 0:
+                return path_row
+            return max(0, min(getattr(self, "last_main_row", 0), self.file_list.count() - 1))
+        return 0
+
+    def _maybe_activate_after_list_refresh(self, target_mode: str, activation_policy: str) -> None:
+        if self.file_list.count() <= 0:
+            return
+
+        target_row = VideoSorter._candidate_row_for_target_mode(self, target_mode)
+        VideoSorter._select_candidate_row(self, target_row)
+
+        if activation_policy == "preserve":
+            return
+        if activation_policy == "auto_if_no_watch" and VideoSorter._has_active_watch_session(self):
+            return
+
+        if target_mode == "main":
+            start_pos = self.last_main_pos if getattr(self, "last_main_pos", 0) > 0 else 0
+            self.play_video(target_row, specific_start_pos=start_pos)
+        else:
+            self.play_video(target_row)
+
     def set_window_icon(self) -> None:
         """애플리케이션 아이콘 및 Windows AppID 설정"""
         icon_path = consts.ICON_PATH
