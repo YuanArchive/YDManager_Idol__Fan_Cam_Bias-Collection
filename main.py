@@ -1217,7 +1217,7 @@ class VideoSorter(QMainWindow):
             # [버그 수정] 현재 재생 중인 파일의 경로 저장
             current_playing_path = self.player.source().toLocalFile()
             
-            self.update_ui_mode()
+            self.update_ui_mode(activation_policy="preserve")
             
             # [버그 수정] 현재 재생 중인 파일을 리스트에서 찾아 선택
             if current_playing_path:
@@ -1258,7 +1258,7 @@ class VideoSorter(QMainWindow):
             self.file_manager.set_search_keyword('')
             if self.root_folder:
                 VideoSorter._load_current_root_files(self)
-            self.update_ui_mode()
+            self.update_ui_mode(activation_policy="preserve")
             self.lbl_info.setText("검색어는 2글자 이상 입력하세요")
             return
         
@@ -1267,7 +1267,7 @@ class VideoSorter(QMainWindow):
         if not text and self.root_folder:
             VideoSorter._load_current_root_files(self)
         
-        self.update_ui_mode()
+        self.update_ui_mode(activation_policy="preserve")
         count = self.file_list.count()
         
         if text:
@@ -1324,7 +1324,7 @@ class VideoSorter(QMainWindow):
                 if self.file_manager.current_mode == 'main':
                     self.save_main_state()
                 self.refresh_folder_history_ui()
-                self.update_ui_mode()
+                self.update_ui_mode(activation_policy="preserve")
         self.video_view.set_info_visible(True)
 
     def reset_viewer_state(self):

@@ -138,9 +138,6 @@ class ShortcutHandler:
                     item.setSelected(True)
                     m.file_list.scrollToItem(item)
                 m.file_list.blockSignals(False)
-                
-                # 첫 번째 파일 재생 시작
-                m.play_video(0)
                     
             m.file_list.repaint()
             return True
@@ -183,6 +180,7 @@ class ShortcutHandler:
                 row = m.file_list.currentRow()
                 if row < 0: row = 0
                 
+                m.file_list.blockSignals(True)
                 m.file_list.clearSelection() # 기존 선택 초기화
                 m.file_list.setCurrentRow(row)
                 
@@ -190,6 +188,7 @@ class ShortcutHandler:
                 if item:
                     item.setSelected(True)
                     m.file_list.scrollToItem(item)
+                m.file_list.blockSignals(False)
                     
             m.file_list.repaint()
             return True

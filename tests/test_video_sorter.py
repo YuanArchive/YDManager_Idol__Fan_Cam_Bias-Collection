@@ -789,8 +789,9 @@ class VideoSorterSearchTest(unittest.TestCase):
 
     def test_empty_search_text_stops_pending_debounce_and_clears_pending_text(self):
         class FakeWindow:
-            def update_ui_mode(self):
+            def update_ui_mode(self, activation_policy="auto_if_no_watch"):
                 self.updated = True
+                self.updated_policy = activation_policy
 
         window = FakeWindow()
         window.root_folder = "C:/videos"
@@ -807,11 +808,13 @@ class VideoSorterSearchTest(unittest.TestCase):
         self.assertEqual(window.file_manager.search_keyword, "")
         self.assertEqual(window.file_manager.scanned_folder, "C:/videos")
         self.assertTrue(window.updated)
+        self.assertEqual(window.updated_policy, "preserve")
 
     def test_empty_search_text_uses_cache_before_direct_scan(self):
         class FakeWindow:
-            def update_ui_mode(self):
+            def update_ui_mode(self, activation_policy="auto_if_no_watch"):
                 self.updated = True
+                self.updated_policy = activation_policy
 
         window = FakeWindow()
         window.root_folder = "C:/videos"
@@ -829,11 +832,13 @@ class VideoSorterSearchTest(unittest.TestCase):
         self.assertEqual(window.file_manager.cache_load_folder, "C:/videos")
         self.assertIsNone(window.file_manager.scanned_folder)
         self.assertTrue(window.updated)
+        self.assertEqual(window.updated_policy, "preserve")
 
     def test_one_character_debounced_search_clears_previous_results(self):
         class FakeWindow:
-            def update_ui_mode(self):
+            def update_ui_mode(self, activation_policy="auto_if_no_watch"):
                 self.updated = True
+                self.updated_policy = activation_policy
 
         window = FakeWindow()
         window.root_folder = "C:/videos"
@@ -847,6 +852,7 @@ class VideoSorterSearchTest(unittest.TestCase):
         self.assertEqual(window.file_manager.search_keyword, "")
         self.assertEqual(window.file_manager.scanned_folder, "C:/videos")
         self.assertTrue(window.updated)
+        self.assertEqual(window.updated_policy, "preserve")
         self.assertIn("2글자", window.lbl_info.text)
 
     def test_one_character_submitted_search_uses_same_guard_as_debounced_search(self):
@@ -855,8 +861,9 @@ class VideoSorterSearchTest(unittest.TestCase):
                 return "a"
 
         class FakeWindow:
-            def update_ui_mode(self):
+            def update_ui_mode(self, activation_policy="auto_if_no_watch"):
                 self.updated = True
+                self.updated_policy = activation_policy
 
         window = FakeWindow()
         window.input_search = FakeInput()
@@ -872,7 +879,24 @@ class VideoSorterSearchTest(unittest.TestCase):
         self.assertEqual(window.file_manager.search_keyword, "")
         self.assertEqual(window.file_manager.scanned_folder, "C:/videos")
         self.assertTrue(window.updated)
+        self.assertEqual(window.updated_policy, "preserve")
         self.assertIn("2글자", window.lbl_info.text)
+
+    def test_execute_search_uses_preserve_refresh_policy(self):
+        class FakeWindow:
+            def update_ui_mode(self, activation_policy="auto_if_no_watch"):
+                self.updated_policy = activation_policy
+
+        window = FakeWindow()
+        window.root_folder = "C:/videos"
+        window._pending_search_text = "sample"
+        window.file_manager = FakeFileManager()
+        window.file_list = FakeFileList()
+        window.lbl_info = FakeLabel()
+
+        VideoSorter._execute_search(window)
+
+        self.assertEqual(window.updated_policy, "preserve")
 
     def test_shift_release_focuses_search_when_pressed_alone_outside_search(self):
         class FakeWindow:

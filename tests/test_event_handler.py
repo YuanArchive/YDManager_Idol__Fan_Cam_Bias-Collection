@@ -358,7 +358,7 @@ class ShortcutHandlerTest(unittest.TestCase):
 
         self.assertEqual(main.calls, [("move_selection", -1), ("move_selection", 1)])
 
-    def test_tab_from_search_focus_moves_to_file_list_and_starts_first_item(self):
+    def test_tab_from_search_focus_moves_to_file_list_without_starting_playback(self):
         handler, main = self.make_handler()
         main.input_search = FakeFocusWidget(True)
         main.file_list = FakeListWidget(False, [FakeListItem("C:/videos/first.mp4")])
@@ -372,7 +372,7 @@ class ShortcutHandlerTest(unittest.TestCase):
         self.assertTrue(main.file_list.hasFocus())
         self.assertEqual(main.file_list.current_row, 0)
         self.assertTrue(main.file_list.items[0].selected)
-        self.assertEqual(main.calls, [("play_video", 0)])
+        self.assertEqual(main.calls, [])
 
     def test_tab_from_file_list_during_search_returns_to_search_input(self):
         handler, main = self.make_handler()
