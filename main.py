@@ -30,6 +30,7 @@ from src.ui.styles import Catppuccin, DARK_THEME
 from src.ui.settings_ui import SettingsDialog
 from src.managers.file_manager import FileManager
 from src.managers.settings_manager import SettingsManager
+from src.managers.thumbnail_manager import ThumbnailTimelineManager
 from src.core import consts
 from src.utils.utils_font import load_fonts
 from src.ui.ui_layout import init_ui
@@ -73,6 +74,7 @@ class VideoSorter(QMainWindow):
         # 설정 및 데이터 매니저 초기화
         self.settings = SettingsManager()
         self.file_manager = FileManager()
+        self.thumbnail_manager = ThumbnailTimelineManager()
         
         # 윈도우 설정
         self.setAcceptDrops(True)
@@ -910,6 +912,7 @@ class VideoSorter(QMainWindow):
 
         start_pos = self._resolve_start_pos(item_widget, specific_start_pos)
         self.target_start_pos = start_pos
+        self._initial_seek_consumed_key = None
         self._last_media_failure_key = None
         self._increment_playback_generation()
         generation = self.playback_generation
@@ -961,7 +964,8 @@ class VideoSorter(QMainWindow):
     def _handle_immediate_seek(self, active_data):
         if self.target_start_pos == -1:
             dur = active_data['player'].duration()
-            pos = random.randint(int(dur*0.1), int(dur*0.9))
+            candidate = self._thumbnail_random_start_candidate(active_data.get("path"), duration_ms=dur)
+            pos = candidate if candidate is not None else random.randint(int(dur*0.1), int(dur*0.9))
             self._execute_seek_and_play(pos)
         else:
             self._execute_seek_and_play(self.target_start_pos)
@@ -982,6 +986,42 @@ class VideoSorter(QMainWindow):
 
     def seek_to_thumbnail(self, timestamp_ms: int) -> None:
         self._execute_seek_and_play(int(timestamp_ms))
+
+    def _thumbnail_random_start_candidate(
+        self,
+        path: str | None,
+        duration_ms: int | None = None,
+    ) -> int | None:
+        if not path:
+            return None
+        manager = getattr(self, "thumbnail_manager", None)
+        if manager is None:
+            return None
+        if duration_ms is None:
+            player = getattr(self, "player", None)
+            if player is None:
+                return None
+            duration_ms = int(player.duration())
+        else:
+            duration_ms = int(duration_ms)
+        if duration_ms <= 0:
+            return None
+        return manager.best_random_start(path, duration_ms)
+
+    def _initial_seek_key(self, active_slot, path: str | None):
+        return (
+            getattr(active_slot, "slot_id", None),
+            getattr(active_slot, "expected_generation", getattr(self, "playback_generation", 0)),
+            path,
+            self.target_start_pos,
+        )
+
+    def _consume_initial_seek_once(self, active_slot, path: str | None) -> bool:
+        key = VideoSorter._initial_seek_key(self, active_slot, path)
+        if getattr(self, "_initial_seek_consumed_key", None) == key:
+            return False
+        self._initial_seek_consumed_key = key
+        return True
             
     def _force_show_screen(self):
         """탐색 지연 시 강제로 화면 표시"""
@@ -1071,18 +1111,29 @@ class VideoSorter(QMainWindow):
             return
 
         active_player.setPlaybackRate(self.playback_rate)
-        self.video_view.set_duration(active_player.duration())
+        active_duration = active_player.duration()
+        self.video_view.set_duration(active_duration)
         active_slot = self.player_engine.active_slot()
         self._show_active_media_ready(getattr(active_slot, "expected_path", None))
 
         if self.target_start_pos == -1:
-            if active_player.duration() > 0:
-                rand_pos = random.randint(0, int(active_player.duration() * 0.90))
+            if active_duration > 0:
+                active_path = getattr(active_slot, "expected_path", None)
+                if not VideoSorter._consume_initial_seek_once(self, active_slot, active_path):
+                    return
+                candidate = self._thumbnail_random_start_candidate(active_path, duration_ms=active_duration)
+                rand_pos = (
+                    candidate
+                    if candidate is not None
+                    else random.randint(0, int(active_duration * 0.90))
+                )
                 self._execute_seek_and_play(rand_pos)
             else:
                 self._force_show_screen()
         elif self.target_start_pos > 0:
-            self._execute_seek_and_play(self.target_start_pos)
+            active_path = getattr(active_slot, "expected_path", None)
+            if VideoSorter._consume_initial_seek_once(self, active_slot, active_path):
+                self._execute_seek_and_play(self.target_start_pos)
 
     def on_media_error(self, error, error_string=""):
         sender_player = self.sender()

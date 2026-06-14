@@ -641,6 +641,77 @@ class ThumbnailPreviewCoordinatorTest(unittest.TestCase):
 
         self.assertEqual(window.seek_calls, [42000])
 
+    def test_random_start_uses_thumbnail_candidate_when_available(self):
+        class FakeManager:
+            def best_random_start(self, path, duration_ms):
+                self.called_with = (path, duration_ms)
+                return 12345
+
+        class FakePlayer:
+            def duration(self):
+                return 90000
+
+        class FakeWindow:
+            def __init__(self):
+                self.thumbnail_manager = FakeManager()
+                self.player = FakePlayer()
+
+        window = FakeWindow()
+
+        result = VideoSorter._thumbnail_random_start_candidate(window, "C:/videos/a.mp4")
+
+        self.assertEqual(result, 12345)
+        self.assertEqual(window.thumbnail_manager.called_with, ("C:/videos/a.mp4", 90000))
+
+    def test_random_start_uses_explicit_duration_when_available(self):
+        class FakeManager:
+            def best_random_start(self, path, duration_ms):
+                self.called_with = (path, duration_ms)
+                return 12345
+
+        window = type("FakeWindow", (), {})()
+        window.thumbnail_manager = FakeManager()
+
+        result = VideoSorter._thumbnail_random_start_candidate(
+            window,
+            "C:/videos/a.mp4",
+            duration_ms=77777,
+        )
+
+        self.assertEqual(result, 12345)
+        self.assertEqual(window.thumbnail_manager.called_with, ("C:/videos/a.mp4", 77777))
+
+    def test_immediate_random_seek_prefers_thumbnail_candidate(self):
+        class FakePlayer:
+            def duration(self):
+                return 90000
+
+        class FakeWindow:
+            def __init__(self):
+                self.target_start_pos = -1
+                self.seek_calls = []
+                self.player = FakePlayer()
+
+            def _thumbnail_random_start_candidate(self, path, duration_ms=None):
+                self.candidate_path = path
+                self.candidate_duration = duration_ms
+                return 22222
+
+            def _execute_seek_and_play(self, timestamp):
+                self.seek_calls.append(timestamp)
+
+        window = FakeWindow()
+
+        with patch("main.random.randint", return_value=11111):
+            VideoSorter._handle_immediate_seek(
+                window,
+                {"player": window.player, "path": "C:/videos/a.mp4"},
+            )
+
+        self.assertEqual(window.candidate_path, "C:/videos/a.mp4")
+        self.assertEqual(window.candidate_duration, 90000)
+        self.assertEqual(window.seek_calls, [22222])
+
 
 class FakeStatusEngine:
     def __init__(self, active_player, revealed=True, active_path=None):
@@ -783,6 +854,114 @@ class PlayerEngineSignalHandlerTest(unittest.TestCase):
         VideoSorter.on_media_status_changed(window, "loaded")
 
         self.assertEqual(window.lbl_info.text, "재생 중: zeta.mp4")
+
+    def test_media_status_changed_random_start_prefers_thumbnail_candidate(self):
+        active_player = FakeDurationPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "sender": lambda self: active_player,
+                "_show_active_media_ready": VideoSorter._show_active_media_ready,
+                "_thumbnail_random_start_candidate": lambda self, path, duration_ms=None: 3333,
+                "_execute_seek_and_play": lambda self, timestamp: self.seek_calls.append(timestamp),
+            },
+        )()
+        window.player_engine = FakeStatusEngine(active_player, revealed=True, active_path="C:/videos/zeta.mp4")
+        window.video_view = FakeVideoView()
+        window.lbl_info = FakeLabel()
+        window.playback_rate = 1.0
+        window.target_start_pos = -1
+        window.seek_calls = []
+
+        with patch("main.random.randint", return_value=1111):
+            VideoSorter.on_media_status_changed(window, "loaded")
+
+        self.assertEqual(window.seek_calls, [3333])
+
+    def test_media_status_changed_random_start_uses_real_helper_and_active_duration(self):
+        class FakeManager:
+            def best_random_start(self, path, duration_ms):
+                self.called_with = (path, duration_ms)
+                return 4444
+
+        active_player = FakeDurationPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "sender": lambda self: active_player,
+                "_show_active_media_ready": VideoSorter._show_active_media_ready,
+                "_thumbnail_random_start_candidate": VideoSorter._thumbnail_random_start_candidate,
+                "_execute_seek_and_play": lambda self, timestamp: self.seek_calls.append(timestamp),
+            },
+        )()
+        window.player_engine = FakeStatusEngine(active_player, revealed=True, active_path="C:/videos/zeta.mp4")
+        window.video_view = FakeVideoView()
+        window.lbl_info = FakeLabel()
+        window.playback_rate = 1.0
+        window.target_start_pos = -1
+        window.seek_calls = []
+        window.thumbnail_manager = FakeManager()
+
+        VideoSorter.on_media_status_changed(window, "loaded")
+
+        self.assertEqual(window.seek_calls, [4444])
+        self.assertEqual(window.thumbnail_manager.called_with, ("C:/videos/zeta.mp4", 10000))
+
+    def test_media_status_changed_random_start_falls_back_when_thumbnail_has_no_candidate(self):
+        class FakeManager:
+            def best_random_start(self, path, duration_ms):
+                return None
+
+        active_player = FakeDurationPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "sender": lambda self: active_player,
+                "_show_active_media_ready": VideoSorter._show_active_media_ready,
+                "_thumbnail_random_start_candidate": VideoSorter._thumbnail_random_start_candidate,
+                "_execute_seek_and_play": lambda self, timestamp: self.seek_calls.append(timestamp),
+            },
+        )()
+        window.player_engine = FakeStatusEngine(active_player, revealed=True, active_path="C:/videos/zeta.mp4")
+        window.video_view = FakeVideoView()
+        window.lbl_info = FakeLabel()
+        window.playback_rate = 1.0
+        window.target_start_pos = -1
+        window.seek_calls = []
+        window.thumbnail_manager = FakeManager()
+
+        with patch("main.random.randint", return_value=1111) as randint:
+            VideoSorter.on_media_status_changed(window, "loaded")
+
+        self.assertEqual(window.seek_calls, [1111])
+        randint.assert_called_once_with(0, 9000)
+
+    def test_media_status_changed_random_start_seeks_once_per_activation(self):
+        active_player = FakeDurationPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "sender": lambda self: active_player,
+                "_show_active_media_ready": VideoSorter._show_active_media_ready,
+                "_thumbnail_random_start_candidate": lambda self, path, duration_ms=None: 3333,
+                "_execute_seek_and_play": lambda self, timestamp: self.seek_calls.append(timestamp),
+            },
+        )()
+        window.player_engine = FakeStatusEngine(active_player, revealed=True, active_path="C:/videos/zeta.mp4")
+        window.video_view = FakeVideoView()
+        window.lbl_info = FakeLabel()
+        window.playback_rate = 1.0
+        window.target_start_pos = -1
+        window.seek_calls = []
+
+        VideoSorter.on_media_status_changed(window, "loaded")
+        VideoSorter.on_media_status_changed(window, "buffered")
+
+        self.assertEqual(window.seek_calls, [3333])
 
     def test_media_status_changed_reports_active_media_failure(self):
         active_player = FakeLoadPlayer()

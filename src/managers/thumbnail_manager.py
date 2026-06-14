@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 
 from src.core import consts
+from src.managers.thumbnail_sampling import choose_random_start_candidate
 from src.ui.thumbnail_rail import ThumbnailCell
 
 
@@ -73,6 +74,16 @@ class ThumbnailTimelineManager:
                 )
             )
         return cells
+
+    def best_random_start(self, path: str, duration_ms: int) -> int | None:
+        cells = self.cached_cells(path)
+        if not cells:
+            return None
+        return choose_random_start_candidate(
+            [cell.timestamp_ms for cell in cells],
+            [cell.quality_score for cell in cells],
+            duration_ms=duration_ms,
+        )
 
     def request_timeline(
         self,

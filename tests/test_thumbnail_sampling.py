@@ -31,6 +31,14 @@ class ThumbnailSamplingTest(unittest.TestCase):
 
         self.assertEqual(result, 2000)
 
+    def test_random_start_keeps_existing_upper_bound(self):
+        timestamps = [85000, 95000]
+        scores = [0.8, 0.99]
+
+        result = choose_random_start_candidate(timestamps, scores, duration_ms=100000, seed=1)
+
+        self.assertEqual(result, 85000)
+
     def test_random_start_returns_none_without_candidates(self):
         self.assertIsNone(choose_random_start_candidate([], [], duration_ms=10000, seed=1))
 

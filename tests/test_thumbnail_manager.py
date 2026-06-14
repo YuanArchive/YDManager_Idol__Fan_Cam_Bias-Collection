@@ -82,3 +82,33 @@ class ThumbnailTimelineManagerTest(unittest.TestCase):
         manager.request_timeline(path, duration_ms=120000, priority="active")
 
         self.assertEqual([job.path for job in manager.pending_jobs], [path])
+
+    def test_best_random_start_uses_cached_quality_scores(self):
+        path = self.make_video()
+        os.makedirs(os.path.join(self.cache_dir, "abc"), exist_ok=True)
+        files = []
+        for index in range(12):
+            name = f"{index:03d}.jpg"
+            thumb = os.path.join(self.cache_dir, "abc", name)
+            with open(thumb, "wb") as file:
+                file.write(b"jpg")
+            files.append(name)
+        stat = os.stat(path)
+        scores = [0.1 for _ in range(12)]
+        scores[4] = 0.95
+        self.write_manifest({
+            os.path.normcase(os.path.normpath(path)): {
+                "path": path,
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+                "duration_ms": 120000,
+                "thumb_count": 12,
+                "cache_id": "abc",
+                "timestamps_ms": [i * 10000 for i in range(12)],
+                "quality_scores": scores,
+                "files": files,
+            }
+        })
+        manager = ThumbnailTimelineManager()
+
+        self.assertEqual(manager.best_random_start(path, duration_ms=120000), 40000)

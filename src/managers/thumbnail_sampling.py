@@ -35,12 +35,16 @@ def choose_random_start_candidate(
     quality_scores: list[float],
     duration_ms: int,
     seed: int | None = None,
+    max_ratio: float = 0.90,
 ) -> int | None:
     if not timestamps_ms or not quality_scores:
         return None
 
     safe_start = int(duration_ms * 0.05)
-    safe_end = int(duration_ms * 0.95)
+    safe_end = int(duration_ms * max_ratio)
+    if safe_end <= safe_start:
+        safe_start = 0
+        safe_end = max(0, duration_ms)
     candidates = [
         (timestamp, score)
         for timestamp, score in zip(timestamps_ms, quality_scores)
