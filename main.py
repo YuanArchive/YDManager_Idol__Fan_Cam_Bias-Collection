@@ -189,7 +189,11 @@ class VideoSorter(QMainWindow):
             self.player_manager.set_active_index(slot.pool_index)
 
     def is_privacy_blocking_video(self) -> bool:
-        return bool(getattr(self, "conf_privacy_mode", False) and not getattr(self, "conf_auto_play", False))
+        if not getattr(self, "conf_privacy_mode", False):
+            return False
+        if hasattr(self, "_user_has_requested_visible_playback"):
+            return not bool(self._user_has_requested_visible_playback)
+        return not bool(getattr(self, "conf_auto_play", False))
 
     def _increment_playback_generation(self) -> None:
         self.playback_generation = getattr(self, "playback_generation", 0) + 1
@@ -971,9 +975,13 @@ class VideoSorter(QMainWindow):
         """탐색 지연 시 강제로 화면 표시"""
         if self.is_waiting_for_seek:
             self.is_waiting_for_seek = False
-            active_data = self.player_manager.get_active_player()
-            if active_data:
-                active_data['item'].setOpacity(1.0)
+            active_slot = self.player_engine.active_slot() if hasattr(self, "player_engine") else None
+            if active_slot:
+                self.player_engine.reveal_if_allowed(active_slot, active_slot.last_status, fallback_expired=True)
+            elif hasattr(self, "player_manager"):
+                active_data = self.player_manager.get_active_player()
+                if active_data:
+                    active_data['item'].setOpacity(1.0)
                 
     def on_clear_all_tags(self, tag_type: str) -> None:
         """[위임] 특정 태그 전체 초기화"""
@@ -989,62 +997,47 @@ class VideoSorter(QMainWindow):
 
     def on_media_status_changed(self, status):
         sender_player = self.sender()
-        active_p = self.player_manager.get_active_player()['player']
-        if sender_player != active_p:
+        revealed = self.player_engine.handle_media_status(sender_player, status)
+        if not revealed:
             return
 
-        if status in [QMediaPlayer.MediaStatus.BufferedMedia, QMediaPlayer.MediaStatus.LoadedMedia]:
-            active_data = self.player_manager.get_active_player()
-            if active_data:
-                active_data['item'].setOpacity(1.0)
-                active_data['item'].setZValue(10.0)
-                
-                # 다른 플레이어 숨김 및 완전 정지
-                idle_indices = self.player_manager.get_idle_players()
-                current_source = active_data['player'].source().toLocalFile()
-                for idx in idle_indices:
-                    p_data = self.player_manager.get_player_by_index(idx)
-                    # [Fix] 현재 재생 중인 파일과 동일한 경로면 해제하지 않음
-                    if p_data['path'] and current_source and os.path.normpath(p_data['path']) == os.path.normpath(current_source):
-                        continue
-                    # [Fix] 로딩 중인 플레이어는 건드리지 않음 (프리로드 보호)
-                    if p_data['player'].mediaStatus() == QMediaPlayer.MediaStatus.LoadingMedia:
-                        continue
-                    p_data['item'].setOpacity(0.0)
-                    p_data['item'].setZValue(0.0)
-                    p_data['player'].stop()
-                    p_data['player'].setSource(QUrl())  # 소스 해제
-                    p_data['path'] = None  # 경로 초기화
+        active_player = self.player_engine.active_player()
+        if active_player is None:
+            return
 
-            sender_player.setPlaybackRate(self.playback_rate)
-            self.video_view.set_duration(self.player.duration())
-            
-            # 지속 재생 로직
-            if self.target_start_pos == -1: 
-                if self.player.duration() > 0:
-                    rand_pos = random.randint(0, int(self.player.duration() * 0.90))
-                    self._execute_seek_and_play(rand_pos)
-                else:
-                    self._force_show_screen()
-            elif self.target_start_pos > 0: 
-                 self._execute_seek_and_play(self.target_start_pos)
+        active_player.setPlaybackRate(self.playback_rate)
+        self.video_view.set_duration(active_player.duration())
+
+        if self.target_start_pos == -1:
+            if active_player.duration() > 0:
+                rand_pos = random.randint(0, int(active_player.duration() * 0.90))
+                self._execute_seek_and_play(rand_pos)
+            else:
+                self._force_show_screen()
+        elif self.target_start_pos > 0:
+            self._execute_seek_and_play(self.target_start_pos)
 
     def on_position_changed(self, position):
-        if self.player.duration() <= 0: return
+        active_player = self.player_engine.active_player() if hasattr(self, "player_engine") else self.player
+        sender_player = self.sender()
+        if sender_player is not None and active_player is not None and sender_player != active_player:
+            return
+        if active_player is None or active_player.duration() <= 0:
+            return
         self.video_view.set_position(position)
         
         if self.is_waiting_for_seek:
             target = getattr(self, '_pending_seek_pos', -1)
             if target != -1 and abs(position - target) < 1000:
-                active_data = self.player_manager.get_active_player()
-                if active_data:
-                    active_data['item'].setOpacity(1.0)
+                active_slot = self.player_engine.active_slot() if hasattr(self, "player_engine") else None
+                if active_slot:
+                    self.player_engine.reveal_if_allowed(active_slot, active_slot.last_status, fallback_expired=True)
                 
                 self.is_waiting_for_seek = False
                 self.seek_safety_timer.stop()
                 
-                if self.conf_auto_play and self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
-                    self.player.play()
+                if self.conf_auto_play and active_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+                    active_player.play()
 
     def on_duration_changed(self, duration): 
         if self.sender() == self.player and duration > 0:
@@ -1174,7 +1167,9 @@ class VideoSorter(QMainWindow):
         self.video_view.set_info_visible(True)
 
     def reset_viewer_state(self):
-        if hasattr(self, 'player_manager'):
+        if hasattr(self, 'player_engine'):
+            self.player_engine.clear_all()
+        elif hasattr(self, 'player_manager'):
             active_data = self.player_manager.get_active_player()
             if active_data:
                 active_data['player'].stop()

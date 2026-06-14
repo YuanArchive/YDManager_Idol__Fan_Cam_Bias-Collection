@@ -430,6 +430,18 @@ class PlayerEngineStatusTest(unittest.TestCase):
         self.assertEqual(active.video_item.opacity, 1.0)
         self.assertTrue(engine.fallback_timer.stopped)
 
+    def test_clear_all_stops_fallback_timer_and_clears_active_id(self):
+        active = make_slot(0, "C:/videos/a.mp4", SlotState.ACTIVE, 3, SlotRole.CURRENT)
+        engine = make_engine([active])
+        engine.active_slot_id = 0
+        engine.fallback_timer.start()
+
+        engine.clear_all()
+
+        self.assertTrue(engine.fallback_timer.stopped)
+        self.assertIsNone(engine.active_slot_id)
+        self.assertEqual(active.state, SlotState.EMPTY)
+
 
 if __name__ == "__main__":
     unittest.main()

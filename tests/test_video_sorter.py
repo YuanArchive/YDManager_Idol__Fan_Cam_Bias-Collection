@@ -135,12 +135,20 @@ class FakeVideoView:
     def __init__(self):
         self.info_visible = None
         self.message = None
+        self.duration = None
+        self.position = None
 
     def set_info_visible(self, visible):
         self.info_visible = visible
 
     def show_temp_message(self, message):
         self.message = message
+
+    def set_duration(self, duration):
+        self.duration = duration
+
+    def set_position(self, position):
+        self.position = position
 
 
 class FakeVideoItem:
@@ -281,6 +289,111 @@ class PlayerEngineIntegrationTest(unittest.TestCase):
         self.assertEqual(window.play_calls, [1])
         self.assertEqual(window.file_list.block_history, [True, False])
         self.assertFalse(window.file_list.signals_blocked)
+
+
+class PlayerEngineResetAndPrivacyTest(unittest.TestCase):
+    def test_reset_viewer_state_clears_engine_slots(self):
+        window = type("FakeWindow", (), {})()
+        window.player_engine = FakePlaybackEngine()
+        window.lbl_info = FakeLabel()
+        window.video_view = FakeVideoView()
+
+        VideoSorter.reset_viewer_state(window)
+
+        self.assertEqual(window.player_engine.clear_all_count, 1)
+
+    def test_privacy_blocking_uses_shared_predicate(self):
+        window = type("FakeWindow", (), {})()
+        window.conf_privacy_mode = True
+        window.conf_auto_play = True
+        window._user_has_requested_visible_playback = False
+
+        self.assertTrue(VideoSorter.is_privacy_blocking_video(window))
+
+        window._user_has_requested_visible_playback = True
+
+        self.assertFalse(VideoSorter.is_privacy_blocking_video(window))
+
+
+class FakeStatusEngine:
+    def __init__(self, active_player, revealed=True):
+        self.active = active_player
+        self.revealed = revealed
+        self.status_calls = []
+
+    def handle_media_status(self, player, status):
+        self.status_calls.append((player, status))
+        return self.revealed
+
+    def active_player(self):
+        return self.active
+
+
+class FakeRevealEngine(FakeStatusEngine):
+    def __init__(self, active_slot):
+        super().__init__(active_player=None, revealed=True)
+        self.slot = active_slot
+        self.reveal_calls = []
+
+    def active_slot(self):
+        return self.slot
+
+    def reveal_if_allowed(self, slot, status, fallback_expired=False):
+        self.reveal_calls.append((slot, status, fallback_expired))
+        return True
+
+
+class FakeDurationPlayer(FakeLoadPlayer):
+    def duration(self):
+        return 10000
+
+
+class PlayerEngineSignalHandlerTest(unittest.TestCase):
+    def test_media_status_changed_delegates_to_engine(self):
+        active_player = FakeLoadPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {"sender": lambda self: active_player},
+        )()
+        window.player_engine = FakeStatusEngine(active_player, revealed=True)
+        window.video_view = FakeVideoView()
+        window.playback_rate = 1.75
+        window.target_start_pos = 0
+
+        VideoSorter.on_media_status_changed(window, "loaded")
+
+        self.assertEqual(window.player_engine.status_calls, [(active_player, "loaded")])
+        self.assertEqual(window.video_view.duration, 0)
+        self.assertEqual(active_player.playback_rate, 1.75)
+
+    def test_position_changed_ignores_inactive_sender(self):
+        active_player = FakeDurationPlayer()
+        stale_player = FakeDurationPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {"sender": lambda self: stale_player},
+        )()
+        window.player_engine = FakeStatusEngine(active_player)
+        window.player = active_player
+        window.video_view = FakeVideoView()
+        window.is_waiting_for_seek = False
+
+        VideoSorter.on_position_changed(window, 2000)
+
+        self.assertIsNone(window.video_view.position)
+
+    def test_force_show_screen_uses_engine_reveal_guard(self):
+        slot = type("FakeSlot", (), {"last_status": "loading"})()
+        window = type("FakeWindow", (), {})()
+        window.player_engine = FakeRevealEngine(slot)
+        window.is_waiting_for_seek = True
+
+        VideoSorter._force_show_screen(window)
+
+        self.assertFalse(window.is_waiting_for_seek)
+        self.assertEqual(window.player_engine.reveal_calls, [(slot, "loading", True)])
 
 
 class VideoSorterSearchTest(unittest.TestCase):

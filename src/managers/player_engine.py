@@ -190,6 +190,27 @@ class PlayerEngine:
         self.fallback_timer.stop()
         self.fallback_timer.start()
 
+    def active_slot(self):
+        for slot in self.slots:
+            if slot.slot_id == self.active_slot_id:
+                return slot
+        return None
+
+    def active_player(self):
+        slot = self.active_slot()
+        return slot.player if slot else None
+
+    def active_audio(self):
+        slot = self.active_slot()
+        return slot.audio if slot else None
+
+    def clear_all(self) -> None:
+        self.fallback_timer.stop()
+        for slot in self.slots:
+            slot.clear()
+        self.active_slot_id = None
+        self.current_generation = 0
+
     def activate(self, path: str, start_pos: int, generation: int, autoplay: bool) -> ActivationResult:
         norm_path = self._normalize_path(path)
         self.current_generation = generation
