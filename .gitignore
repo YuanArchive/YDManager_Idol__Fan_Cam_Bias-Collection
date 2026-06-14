@@ -10,6 +10,8 @@ final_check_*/     # 백업 폴더 (중복 코드 방지)
 .context/
 .antigravity/
 index/
+manual_test_appdata/
+manual_test_media/
 *.log
 
 # --- Build Artifacts ---

@@ -227,12 +227,16 @@ class FileActionController:
         new_path = os.path.normpath(os.path.join(os.path.dirname(current_item['path']), new_basename))
         current_pos = self.app.player.position()
         
-        # 현재 활성 플레이어의 인덱스 저장 (같은 플레이어 재사용)
-        active_idx = self.app.player_manager.active_indices[self.app.player_manager.current_mode]
+        current_row = self.app.file_list.currentRow()
         active_data = self.app.player_manager.get_active_player()
         
         # 파일 이름 변경 전 핸들 해제
-        if active_data:
+        if hasattr(self.app, "player_engine"):
+            suppressions = getattr(self.app, "_suppressed_media_failure_paths", set())
+            suppressions.add(os.path.normcase(os.path.normpath(current_item['path'])))
+            self.app._suppressed_media_failure_paths = suppressions
+            self.app.player_engine.clear_path(current_item['path'])
+        elif active_data:
             active_data['player'].stop()
             active_data['player'].setSource(QUrl())
             active_data['path'] = None
@@ -247,22 +251,24 @@ class FileActionController:
             if success: 
                 item_widget.setText(msg) 
                 item_widget.setData(Qt.ItemDataRole.UserRole, new_path)
-                
-                # 같은 플레이어에 직접 새 소스 설정
-                self.app.player_manager.active_indices[self.app.player_manager.current_mode] = active_idx
-                active_data['path'] = new_path
-                active_data['player'].setSource(QUrl.fromLocalFile(new_path))
-                active_data['item'].setOpacity(1.0)
-                active_data['item'].setZValue(10.0)
-                
-                # 위치 복원 및 재생
-                def _seek_and_play():
-                    if current_pos > 0:
-                        active_data['player'].setPosition(current_pos)
-                    if self.app.conf_auto_play:
-                        active_data['player'].play()
-                    active_data['audio'].setMuted(not self.app.chk_audio.isChecked())
-                QTimer.singleShot(50, _seek_and_play)
+
+                if hasattr(self.app, "play_video"):
+                    self.app.play_video(current_row, specific_start_pos=current_pos if current_pos > 0 else 0)
+                    return
+
+                if active_data:
+                    active_data['path'] = new_path
+                    active_data['player'].setSource(QUrl.fromLocalFile(new_path))
+                    active_data['item'].setOpacity(1.0)
+                    active_data['item'].setZValue(10.0)
+
+                    def _seek_and_play():
+                        if current_pos > 0:
+                            active_data['player'].setPosition(current_pos)
+                        if self.app.conf_auto_play:
+                            active_data['player'].play()
+                        active_data['audio'].setMuted(not self.app.chk_audio.isChecked())
+                    QTimer.singleShot(50, _seek_and_play)
             else: 
                 ThemeMessageBox.warning(self.app, "오류", msg)
         

@@ -34,7 +34,7 @@ from src.core import consts
 from src.utils.utils_font import load_fonts
 from src.ui.ui_layout import init_ui
 from src.managers.player_manager import PlayerManager
-from src.managers.player_engine import PlaybackItem, PlayerEngine
+from src.managers.player_engine import PlaybackItem, PlayerEngine, SlotState
 from src.core.event_handler import ShortcutHandler, GlobalAppFilter
 from src.core.signal_setup import setup_app_connections
 from src.ui.ui_components import ThemeMessageBox, ProVideoView
@@ -762,6 +762,7 @@ class VideoSorter(QMainWindow):
 
         start_pos = self._resolve_start_pos(item_widget, specific_start_pos)
         self.target_start_pos = start_pos
+        self._last_media_failure_key = None
         self._increment_playback_generation()
         generation = self.playback_generation
         autoplay = bool(self.conf_auto_play)
@@ -995,10 +996,57 @@ class VideoSorter(QMainWindow):
     # 6. Signal Slots (시그널 슬롯)
     # =========================================================================
 
+    def _show_active_media_failure(self, error_text=None) -> None:
+        filename = "선택한 파일"
+        path = None
+        try:
+            item = self.file_list.currentItem()
+            path = item.data(Qt.ItemDataRole.UserRole) if item else None
+            if path:
+                filename = os.path.basename(path)
+        except Exception:
+            pass
+
+        error_key = error_text or "unknown"
+        media_key = os.path.normcase(os.path.normpath(path)) if path else filename
+        suppressed_paths = getattr(self, "_suppressed_media_failure_paths", set())
+        if media_key in suppressed_paths:
+            suppressed_paths.discard(media_key)
+            self._suppressed_media_failure_paths = suppressed_paths
+            return
+
+        failure_key = (media_key, error_key)
+        if getattr(self, "_last_media_failure_key", None) == failure_key:
+            return
+        self._last_media_failure_key = failure_key
+
+        message = f"재생 실패: {filename}"
+        if hasattr(self, "lbl_info"):
+            self.lbl_info.setText(message)
+        if hasattr(self, "video_view"):
+            self.video_view.show_temp_message(message)
+        logger.warning("Media load failed: %s (%s)", filename, error_text or "unknown")
+
+    def _show_active_media_ready(self, path: str | None) -> None:
+        if not path or not hasattr(self, "lbl_info"):
+            return
+        self.lbl_info.setText(f"재생 중: {os.path.basename(path)}")
+        self._last_media_failure_key = None
+
     def on_media_status_changed(self, status):
         sender_player = self.sender()
+        active_before = self.player_engine.active_player()
+        was_active_sender = sender_player is not None and sender_player == active_before
         revealed = self.player_engine.handle_media_status(sender_player, status)
         if not revealed:
+            active_slot = self.player_engine.active_slot()
+            if (
+                was_active_sender
+                and active_slot is not None
+                and active_slot.player == sender_player
+                and active_slot.state == SlotState.FAILED
+            ):
+                self._show_active_media_failure(active_slot.last_error)
             return
 
         active_player = self.player_engine.active_player()
@@ -1007,6 +1055,8 @@ class VideoSorter(QMainWindow):
 
         active_player.setPlaybackRate(self.playback_rate)
         self.video_view.set_duration(active_player.duration())
+        active_slot = self.player_engine.active_slot()
+        self._show_active_media_ready(getattr(active_slot, "expected_path", None))
 
         if self.target_start_pos == -1:
             if active_player.duration() > 0:
@@ -1016,6 +1066,16 @@ class VideoSorter(QMainWindow):
                 self._force_show_screen()
         elif self.target_start_pos > 0:
             self._execute_seek_and_play(self.target_start_pos)
+
+    def on_media_error(self, error, error_string=""):
+        sender_player = self.sender()
+        active_before = self.player_engine.active_player()
+        was_active_sender = sender_player is not None and sender_player == active_before
+        error_text = error_string or getattr(error, "name", str(error))
+        was_active = self.player_engine.handle_media_error(sender_player, error_text)
+        if was_active and was_active_sender:
+            active_slot = self.player_engine.active_slot()
+            self._show_active_media_failure(active_slot.last_error if active_slot else error_text)
 
     def on_position_changed(self, position):
         active_player = self.player_engine.active_player() if hasattr(self, "player_engine") else self.player
@@ -1357,6 +1417,7 @@ class VideoSorter(QMainWindow):
             for p_data in self.player_manager.pools[mode]:
                 player = p_data['player']
                 player.mediaStatusChanged.connect(self.on_media_status_changed)
+                player.errorOccurred.connect(self.on_media_error)
                 player.positionChanged.connect(self.on_position_changed)
                 player.durationChanged.connect(self.on_duration_changed)
                 

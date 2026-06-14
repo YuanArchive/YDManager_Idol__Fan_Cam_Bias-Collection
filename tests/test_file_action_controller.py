@@ -341,6 +341,10 @@ class FileActionControllerTest(unittest.TestCase):
             "item": FakeVideoItem(),
             "audio": FakeAudio(),
         }
+        app.player_engine = FakePlayerEngine()
+        app.player.position_value = 4321
+        app.play_calls = []
+        app.play_video = lambda row, specific_start_pos=None: app.play_calls.append((row, specific_start_pos))
         app.conf_auto_play = False
         app.chk_audio = FakeCheck(True)
         controller = FileActionController(app)
@@ -354,6 +358,8 @@ class FileActionControllerTest(unittest.TestCase):
         self.assertEqual(app.file_manager.rename_args, (old_path, "#a.mp4"))
         self.assertEqual(app.file_list.item(0).text(), "#a.mp4")
         self.assertEqual(app.file_list.item(0).data(Qt.ItemDataRole.UserRole), new_path)
+        self.assertEqual(app.player_engine.cleared_paths, [old_path])
+        self.assertEqual(app.play_calls, [(0, 4321)])
 
     def test_replay_current_highlight_ignores_stale_ui_row_when_current_list_is_shorter(self):
         class HighlightFileManager(FakeFileManager):

@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 
@@ -5,6 +6,7 @@ from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtMultimedia import QMediaPlayer
 
 from main import VideoSorter
+from src.managers.player_engine import SlotState
 
 
 class FakeTimer:
@@ -109,6 +111,11 @@ class FakePlayableList:
 
     def setCurrentRow(self, row):
         self.current_row = row
+
+    def currentItem(self):
+        if 0 <= self.current_row < len(self.items):
+            return self.items[self.current_row]
+        return None
 
     def blockSignals(self, blocked):
         self.signals_blocked = blocked
@@ -248,6 +255,7 @@ class PlayerEngineIntegrationTest(unittest.TestCase):
         window.video_view = FakeVideoView()
         window.player = FakeLoadPlayer()
         window.playback_rate = 1.0
+        window._last_media_failure_key = ("stale.mp4", "nomedia")
         window._prepare_playback = lambda index: VideoSorter._prepare_playback(window, index)
         window._resolve_start_pos = lambda item, specific_pos: VideoSorter._resolve_start_pos(window, item, specific_pos)
         window._current_playlist_items = lambda: VideoSorter._current_playlist_items(window)
@@ -256,6 +264,7 @@ class PlayerEngineIntegrationTest(unittest.TestCase):
         VideoSorter.play_video(window, 1)
 
         self.assertEqual(window.playback_generation, 6)
+        self.assertIsNone(window._last_media_failure_key)
         self.assertEqual(window.player_engine.activate_calls, [("C:/videos/b.mp4", 2000, 6, True)])
         self.assertEqual(
             window.player_engine.plan_calls,
@@ -316,10 +325,11 @@ class PlayerEngineResetAndPrivacyTest(unittest.TestCase):
 
 
 class FakeStatusEngine:
-    def __init__(self, active_player, revealed=True):
+    def __init__(self, active_player, revealed=True, active_path=None):
         self.active = active_player
         self.revealed = revealed
         self.status_calls = []
+        self.slot = type("FakeActiveSlot", (), {"expected_path": active_path})() if active_path else None
 
     def handle_media_status(self, player, status):
         self.status_calls.append((player, status))
@@ -327,6 +337,36 @@ class FakeStatusEngine:
 
     def active_player(self):
         return self.active
+
+    def active_slot(self):
+        return self.slot
+
+
+class FakeFailedStatusEngine(FakeStatusEngine):
+    def __init__(self, active_player, last_error="invalidmedia"):
+        super().__init__(active_player=active_player, revealed=False)
+        self.slot = type(
+            "FakeFailedSlot",
+            (),
+            {
+                "player": active_player,
+                "state": SlotState.FAILED,
+                "last_error": last_error,
+            },
+        )()
+
+    def active_slot(self):
+        return self.slot
+
+
+class FakeErrorEngine(FakeFailedStatusEngine):
+    def __init__(self, active_player):
+        super().__init__(active_player, last_error="resourceerror")
+        self.error_calls = []
+
+    def handle_media_error(self, player, error_text):
+        self.error_calls.append((player, error_text))
+        return True
 
 
 class FakeRevealEngine(FakeStatusEngine):
@@ -354,10 +394,14 @@ class PlayerEngineSignalHandlerTest(unittest.TestCase):
         window = type(
             "FakeWindow",
             (),
-            {"sender": lambda self: active_player},
+            {
+                "sender": lambda self: active_player,
+                "_show_active_media_ready": VideoSorter._show_active_media_ready,
+            },
         )()
         window.player_engine = FakeStatusEngine(active_player, revealed=True)
         window.video_view = FakeVideoView()
+        window.lbl_info = FakeLabel()
         window.playback_rate = 1.75
         window.target_start_pos = 0
 
@@ -366,6 +410,145 @@ class PlayerEngineSignalHandlerTest(unittest.TestCase):
         self.assertEqual(window.player_engine.status_calls, [(active_player, "loaded")])
         self.assertEqual(window.video_view.duration, 0)
         self.assertEqual(active_player.playback_rate, 1.75)
+
+    def test_media_status_changed_clears_stale_failure_after_successful_reveal(self):
+        active_player = FakeLoadPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "sender": lambda self: active_player,
+                "_show_active_media_ready": VideoSorter._show_active_media_ready,
+            },
+        )()
+        window.player_engine = FakeStatusEngine(active_player, revealed=True, active_path="C:/videos/b.mp4")
+        window.video_view = FakeVideoView()
+        window.lbl_info = FakeLabel()
+        window.lbl_info.setText("재생 실패: b.mp4")
+        window.playback_rate = 1.0
+        window.target_start_pos = 0
+
+        VideoSorter.on_media_status_changed(window, "loaded")
+
+        self.assertEqual(window.lbl_info.text, "재생 중: b.mp4")
+
+    def test_media_status_changed_updates_previous_ready_label_on_successful_reveal(self):
+        active_player = FakeLoadPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "sender": lambda self: active_player,
+                "_show_active_media_ready": VideoSorter._show_active_media_ready,
+            },
+        )()
+        window.player_engine = FakeStatusEngine(active_player, revealed=True, active_path="C:/videos/zeta.mp4")
+        window.video_view = FakeVideoView()
+        window.lbl_info = FakeLabel()
+        window.lbl_info.setText("재생 중: delta.mp4")
+        window.playback_rate = 1.0
+        window.target_start_pos = 0
+
+        VideoSorter.on_media_status_changed(window, "loaded")
+
+        self.assertEqual(window.lbl_info.text, "재생 중: zeta.mp4")
+
+    def test_media_status_changed_reports_active_media_failure(self):
+        active_player = FakeLoadPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "sender": lambda self: active_player,
+                "_show_active_media_failure": VideoSorter._show_active_media_failure,
+            },
+        )()
+        window.player_engine = FakeFailedStatusEngine(active_player)
+        window.file_list = FakePlayableList()
+        window.file_list.setCurrentRow(1)
+        window.lbl_info = FakeLabel()
+        window.video_view = FakeVideoView()
+
+        with patch("main.logger.warning") as warning:
+            VideoSorter.on_media_status_changed(window, "InvalidMedia")
+
+        self.assertEqual(window.player_engine.status_calls, [(active_player, "InvalidMedia")])
+        self.assertEqual(window.lbl_info.text, "재생 실패: b.mp4")
+        self.assertEqual(window.video_view.message, "재생 실패: b.mp4")
+        warning.assert_called_once()
+
+    def test_media_status_changed_suppresses_intentional_release_failure(self):
+        active_player = FakeLoadPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "sender": lambda self: active_player,
+                "_show_active_media_failure": VideoSorter._show_active_media_failure,
+            },
+        )()
+        window.player_engine = FakeFailedStatusEngine(active_player, last_error="nomedia")
+        window.file_list = FakePlayableList()
+        window.file_list.setCurrentRow(1)
+        window.lbl_info = FakeLabel()
+        window.video_view = FakeVideoView()
+        suppressed_key = os.path.normcase(os.path.normpath("C:/videos/b.mp4"))
+        window._suppressed_media_failure_paths = {suppressed_key}
+
+        with patch("main.logger.warning") as warning:
+            VideoSorter.on_media_status_changed(window, "NoMedia")
+
+        self.assertEqual(window.lbl_info.text, "")
+        self.assertIsNone(window.video_view.message)
+        self.assertEqual(window._suppressed_media_failure_paths, set())
+        warning.assert_not_called()
+
+    def test_media_status_changed_reports_repeated_active_media_failure_once(self):
+        active_player = FakeLoadPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "sender": lambda self: active_player,
+                "_show_active_media_failure": VideoSorter._show_active_media_failure,
+            },
+        )()
+        window.player_engine = FakeFailedStatusEngine(active_player, last_error="nomedia")
+        window.file_list = FakePlayableList()
+        window.file_list.setCurrentRow(1)
+        window.lbl_info = FakeLabel()
+        window.video_view = FakeVideoView()
+
+        with patch("main.logger.warning") as warning:
+            VideoSorter.on_media_status_changed(window, "NoMedia")
+            VideoSorter.on_media_status_changed(window, "NoMedia")
+
+        self.assertEqual(window.lbl_info.text, "재생 실패: b.mp4")
+        self.assertEqual(window.video_view.message, "재생 실패: b.mp4")
+        warning.assert_called_once()
+
+    def test_media_error_reports_active_media_failure(self):
+        active_player = FakeLoadPlayer()
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "sender": lambda self: active_player,
+                "_show_active_media_failure": VideoSorter._show_active_media_failure,
+            },
+        )()
+        window.player_engine = FakeErrorEngine(active_player)
+        window.file_list = FakePlayableList()
+        window.file_list.setCurrentRow(1)
+        window.lbl_info = FakeLabel()
+        window.video_view = FakeVideoView()
+
+        with patch("main.logger.warning") as warning:
+            VideoSorter.on_media_error(window, "ResourceError", "codec failed")
+
+        self.assertEqual(window.player_engine.error_calls, [(active_player, "codec failed")])
+        self.assertEqual(window.lbl_info.text, "재생 실패: b.mp4")
+        warning.assert_called_once()
 
     def test_position_changed_ignores_inactive_sender(self):
         active_player = FakeDurationPlayer()

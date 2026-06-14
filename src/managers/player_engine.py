@@ -381,7 +381,7 @@ class PlayerEngine:
 
     def _is_failed_status(self, status) -> bool:
         name = self._status_name(status)
-        return "invalid" in name or "nomedia" in name or name == "none"
+        return "invalid" in name
 
     def reveal_if_allowed(self, slot, status, fallback_expired: bool = False) -> bool:
         if slot.state != SlotState.ACTIVE:
@@ -429,3 +429,12 @@ class PlayerEngine:
                 self.fallback_timer.stop()
             return revealed
         return False
+
+    def handle_media_error(self, player, error_text) -> bool:
+        slot = self._slot_for_player(player)
+        if slot is None:
+            return False
+        was_active = slot.state == SlotState.ACTIVE
+        if slot.state in {SlotState.ACTIVE, SlotState.PRELOADING, SlotState.READY}:
+            self._mark_failed(slot, error_text)
+        return was_active

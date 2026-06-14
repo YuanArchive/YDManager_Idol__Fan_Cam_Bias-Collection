@@ -418,6 +418,29 @@ class PlayerEngineStatusTest(unittest.TestCase):
         self.assertEqual(active.video_item.opacity, 0.0)
         self.assertTrue(active.audio.muted)
 
+    def test_no_media_status_does_not_mark_active_slot_failed(self):
+        active = make_slot(0, "C:/videos/a.mp4", SlotState.ACTIVE, 3, SlotRole.CURRENT)
+        engine = make_engine([active])
+        engine.current_generation = 3
+
+        revealed = engine.handle_media_status(active.player, MediaStatus.NoMedia)
+
+        self.assertFalse(revealed)
+        self.assertEqual(active.state, SlotState.ACTIVE)
+        self.assertEqual(os.path.normpath(active.expected_path), os.path.normpath("C:/videos/a.mp4"))
+
+    def test_media_error_marks_active_slot_failed(self):
+        active = make_slot(0, "C:/videos/broken.mp4", SlotState.ACTIVE, 3, SlotRole.CURRENT)
+        engine = make_engine([active])
+        engine.current_generation = 3
+
+        handled = engine.handle_media_error(active.player, "ResourceError")
+
+        self.assertTrue(handled)
+        self.assertEqual(active.state, SlotState.FAILED)
+        self.assertIsNone(active.expected_path)
+        self.assertEqual(active.last_error, "resourceerror")
+
     def test_loaded_active_reveals_screen_and_stops_fallback_timer(self):
         active = make_slot(0, "C:/videos/a.mp4", SlotState.ACTIVE, 3, SlotRole.CURRENT)
         engine = make_engine([active])
