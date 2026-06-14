@@ -34,6 +34,7 @@ from src.core import consts
 from src.utils.utils_font import load_fonts
 from src.ui.ui_layout import init_ui
 from src.managers.player_manager import PlayerManager
+from src.managers.player_engine import PlaybackItem, PlayerEngine
 from src.core.event_handler import ShortcutHandler, GlobalAppFilter
 from src.core.signal_setup import setup_app_connections
 from src.ui.ui_components import ThemeMessageBox, ProVideoView
@@ -134,6 +135,16 @@ class VideoSorter(QMainWindow):
         QTimer.singleShot(0, self.apply_16_9_ratio)
         
         self.player_manager = PlayerManager(self.video_view, self.chk_audio)
+        self.playback_generation = 0
+        self.player_engine = PlayerEngine(
+            slots=self.player_manager.engine_slots(),
+            fallback_timer=self.seek_safety_timer,
+            privacy_guard=self.is_privacy_blocking_video,
+            autoplay_getter=lambda: self.conf_auto_play,
+            audio_enabled_getter=lambda: self.chk_audio.isChecked(),
+            mode_getter=lambda: self.player_manager.current_mode,
+            activate_slot_callback=self._activate_engine_slot,
+        )
         
         # [리팩토링] 파일 액션 컨트롤러 초기화
         self.file_action = FileActionController(self)
@@ -172,6 +183,31 @@ class VideoSorter(QMainWindow):
     def audio_output(self) -> QAudioOutput:
         """현재 활성화된 오디오 출력 객체를 반환합니다."""
         return self.player_manager.get_active_player()['audio']
+
+    def _activate_engine_slot(self, slot) -> None:
+        if self.player_manager.current_mode == slot.mode:
+            self.player_manager.set_active_index(slot.pool_index)
+
+    def is_privacy_blocking_video(self) -> bool:
+        return bool(getattr(self, "conf_privacy_mode", False) and not getattr(self, "conf_auto_play", False))
+
+    def _increment_playback_generation(self) -> None:
+        self.playback_generation = getattr(self, "playback_generation", 0) + 1
+
+    def _current_playlist_items(self) -> List[PlaybackItem]:
+        items = []
+        random_start = self.chk_random.isChecked()
+        for row in range(self.file_list.count()):
+            item = self.file_list.item(row)
+            if item is None:
+                continue
+            path = item.data(Qt.ItemDataRole.UserRole)
+            if not path:
+                continue
+            saved_pos = item.data(Qt.ItemDataRole.UserRole + 1)
+            start_pos = -1 if random_start else int(saved_pos) if saved_pos is not None else 0
+            items.append(PlaybackItem(path=path, start_pos=start_pos))
+        return items
 
     def set_window_icon(self) -> None:
         """애플리케이션 아이콘 및 Windows AppID 설정"""
@@ -716,33 +752,31 @@ class VideoSorter(QMainWindow):
 
     def play_video(self, index: int, specific_start_pos: Optional[int] = None) -> None:
         """[Entry] 비디오 재생 메인 진입점. 끊김 없는 재생 보장."""
-        # 1. 검증 및 준비
         target_path, item_widget = self._prepare_playback(index)
         if not target_path:
             return
 
-        # 2. 시작 위치 결정 (가장 먼저 수행해야 같은 파일일 때도 이동 가능)
-        self.target_start_pos = self._resolve_start_pos(item_widget, specific_start_pos)
+        start_pos = self._resolve_start_pos(item_widget, specific_start_pos)
+        self.target_start_pos = start_pos
+        self._increment_playback_generation()
+        generation = self.playback_generation
+        autoplay = bool(self.conf_auto_play)
 
-        # [중요] 현재 재생 중인 소스와 같다면 리로드 방지 (단, 명시적 위치 이동은 허용)
-        current_source = self.player.source().toLocalFile()
-        if current_source and os.path.normpath(current_source) == os.path.normpath(target_path):
-            # [버그 수정] 같은 파일이라도 목표 위치가 다르면 이동 (하이라이트 등)
-            if self.target_start_pos != -1: # 랜덤(-1)이 아닐 때
-                # 1초 이상 차이나면 이동 (불필요한 점프 방지)
-                if abs(self.player.position() - self.target_start_pos) > 1000:
-                    self.player.setPosition(self.target_start_pos)
-            
-            if self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
-                self.player.play()
-            return
+        self.video_view.set_info_visible(False)
+        if getattr(self, "conf_privacy_mode", False) and not autoplay:
+            self.setWindowTitle("YDManager")
+        else:
+            self.setWindowTitle(f"재생: {os.path.basename(target_path)}")
 
-        # 3. 플레이어 할당 및 상태 정리
-        active_data = self.player_manager.prepare_player_for_path(target_path)
-        self._sync_player_layers(active_data)
+        result = self.player_engine.activate(target_path, start_pos, generation, autoplay)
+        self.player.setPlaybackRate(self.playback_rate)
+        self.is_waiting_for_seek = result.waiting_for_media
+        self.player_engine.plan_neighbors(index, self._current_playlist_items(), generation)
 
-        # 4. 실제 재생 실행
-        self._execute_media_load(active_data, target_path)
+        if autoplay and self.chk_autoscan.isChecked():
+            self.scan_timer.start()
+        else:
+            self.scan_timer.stop()
 
     def _prepare_playback(self, index: int) -> Tuple[Optional[str], Optional[QListWidgetItem]]:
         self.scan_timer.stop()
@@ -1214,11 +1248,16 @@ class VideoSorter(QMainWindow):
     def auto_play_next(self, row):
         current_len = self.file_list.count()
         if row < current_len: 
+            self.file_list.blockSignals(True)
             self.file_list.setCurrentRow(row)
+            self.file_list.blockSignals(False)
             self.play_video(row)
         elif current_len > 0: 
-            self.file_list.setCurrentRow(current_len - 1)
-            self.play_video(current_len - 1)
+            target_row = current_len - 1
+            self.file_list.blockSignals(True)
+            self.file_list.setCurrentRow(target_row)
+            self.file_list.blockSignals(False)
+            self.play_video(target_row)
         else: 
             self.reset_viewer_state()
             self.setWindowTitle("Pro 동영상 플레이어")

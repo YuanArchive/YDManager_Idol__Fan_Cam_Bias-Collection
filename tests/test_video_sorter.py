@@ -74,6 +74,47 @@ class FakeFileList:
         self.cleared = True
 
 
+class FakeListItem:
+    def __init__(self, path, start_pos=None):
+        self.path = path
+        self.start_pos = start_pos
+
+    def data(self, role):
+        if role == Qt.ItemDataRole.UserRole:
+            return self.path
+        if role == Qt.ItemDataRole.UserRole + 1:
+            return self.start_pos
+        return None
+
+
+class FakePlayableList:
+    def __init__(self):
+        self.items = [
+            FakeListItem("C:/videos/a.mp4"),
+            FakeListItem("C:/videos/b.mp4", 2000),
+            FakeListItem("C:/videos/c.mp4"),
+        ]
+        self.current_row = 0
+        self.signals_blocked = False
+        self.block_history = []
+
+    def count(self):
+        return len(self.items)
+
+    def item(self, index):
+        return self.items[index]
+
+    def currentRow(self):
+        return self.current_row
+
+    def setCurrentRow(self, row):
+        self.current_row = row
+
+    def blockSignals(self, blocked):
+        self.signals_blocked = blocked
+        self.block_history.append(blocked)
+
+
 class FakeLabel:
     def __init__(self):
         self.text = ""
@@ -163,6 +204,83 @@ class FakeKeyEvent:
 class AlwaysHandledShortcut:
     def process_event(self, source, event):
         return True
+
+
+class FakePlaybackEngine:
+    def __init__(self):
+        self.activate_calls = []
+        self.plan_calls = []
+        self.clear_all_count = 0
+
+    def activate(self, path, start_pos, generation, autoplay):
+        self.activate_calls.append((path, start_pos, generation, autoplay))
+        return type("ActivationResult", (), {"slot_id": 0, "waiting_for_media": False})()
+
+    def plan_neighbors(self, current_index, playlist, generation):
+        self.plan_calls.append((current_index, [(item.path, item.start_pos) for item in playlist], generation))
+
+    def clear_all(self):
+        self.clear_all_count += 1
+
+
+class PlayerEngineIntegrationTest(unittest.TestCase):
+    def test_play_video_delegates_activation_and_neighbor_planning_with_new_generation(self):
+        window = type("FakeWindow", (), {"setWindowTitle": lambda self, title: setattr(self, "title", title)})()
+        window.file_list = FakePlayableList()
+        window.scan_timer = FakeTimer()
+        window.preload_timer = FakeTimer()
+        window.seek_safety_timer = FakeTimer()
+        window.is_waiting_for_seek = False
+        window.chk_random = FakeCheck(False)
+        window.chk_autoscan = FakeCheck(False)
+        window.conf_auto_play = True
+        window.conf_privacy_mode = False
+        window.playback_generation = 5
+        window.player_engine = FakePlaybackEngine()
+        window.video_view = FakeVideoView()
+        window.player = FakeLoadPlayer()
+        window.playback_rate = 1.0
+        window._prepare_playback = lambda index: VideoSorter._prepare_playback(window, index)
+        window._resolve_start_pos = lambda item, specific_pos: VideoSorter._resolve_start_pos(window, item, specific_pos)
+        window._current_playlist_items = lambda: VideoSorter._current_playlist_items(window)
+        window._increment_playback_generation = lambda: VideoSorter._increment_playback_generation(window)
+
+        VideoSorter.play_video(window, 1)
+
+        self.assertEqual(window.playback_generation, 6)
+        self.assertEqual(window.player_engine.activate_calls, [("C:/videos/b.mp4", 2000, 6, True)])
+        self.assertEqual(
+            window.player_engine.plan_calls,
+            [
+                (
+                    1,
+                    [
+                        ("C:/videos/a.mp4", 0),
+                        ("C:/videos/b.mp4", 2000),
+                        ("C:/videos/c.mp4", 0),
+                    ],
+                    6,
+                )
+            ],
+        )
+
+    def test_auto_play_next_blocks_selection_signal_before_explicit_play(self):
+        window = type("FakeWindow", (), {})()
+        window.file_list = FakePlayableList()
+        window.play_calls = []
+        window.reset_viewer_state = lambda: None
+        window.setWindowTitle = lambda title: None
+
+        def record_play(row):
+            window.play_calls.append(row)
+
+        window.play_video = record_play
+
+        VideoSorter.auto_play_next(window, 1)
+
+        self.assertEqual(window.play_calls, [1])
+        self.assertEqual(window.file_list.block_history, [True, False])
+        self.assertFalse(window.file_list.signals_blocked)
 
 
 class VideoSorterSearchTest(unittest.TestCase):

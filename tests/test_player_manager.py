@@ -115,6 +115,16 @@ class PlayerManagerTest(unittest.TestCase):
         self.assertEqual(entry["item"].z, 0.0)
         self.assertTrue(entry["audio"].muted)
 
+    def test_engine_slots_preserve_mode_pool_index_and_backing_entry(self):
+        manager = make_manager()
+
+        slots = manager.engine_slots()
+
+        main_slots = [slot for slot in slots if slot.mode == "main"]
+        self.assertEqual([slot.pool_index for slot in main_slots], [0, 1, 2])
+        self.assertIs(main_slots[0].entry, manager.pools["main"][0])
+        self.assertEqual(main_slots[0].expected_path, os.path.normpath("C:/videos/active.mp4"))
+
 
 if __name__ == "__main__":
     unittest.main()

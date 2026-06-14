@@ -44,6 +44,8 @@ class PlayerSlot:
     player: Any
     audio: Any
     video_item: Any
+    pool_index: int = 0
+    entry: Any = None
     expected_path: str | None = None
     expected_generation: int = 0
     state: SlotState = SlotState.EMPTY
@@ -65,6 +67,8 @@ class PlayerSlot:
         self.last_error = None
         self.last_status = None
         self.requested_start_pos = 0
+        if self.entry is not None:
+            self.entry["path"] = None
 
 
 def _empty_qurl():
@@ -110,44 +114,76 @@ def _qurl_from_path(path: str):
 
 
 class PlayerEngine:
-    def __init__(self, slots, fallback_timer, privacy_guard, autoplay_getter, audio_enabled_getter):
+    def __init__(
+        self,
+        slots,
+        fallback_timer,
+        privacy_guard,
+        autoplay_getter,
+        audio_enabled_getter,
+        mode_getter=None,
+        activate_slot_callback=None,
+    ):
         self.slots = slots
         self.fallback_timer = fallback_timer
         self.privacy_guard = privacy_guard
         self.autoplay_getter = autoplay_getter
         self.audio_enabled_getter = audio_enabled_getter
+        self.mode_getter = mode_getter
+        self.activate_slot_callback = activate_slot_callback
         self.active_slot_id = None
         self.current_generation = 0
 
     def _normalize_path(self, path: str) -> str:
         return os.path.normpath(path)
 
+    def _active_slots(self):
+        if self.mode_getter is None:
+            return list(self.slots)
+        current_mode = self.mode_getter()
+        return [slot for slot in self.slots if slot.mode == current_mode]
+
+    def _set_slot_path(self, slot, path: str | None) -> None:
+        slot.expected_path = self._normalize_path(path) if path else None
+        if slot.entry is not None:
+            slot.entry["path"] = slot.expected_path
+
     def _find_valid_slot(self, path: str, generation: int):
         norm_path = self._normalize_path(path)
-        for slot in self.slots:
+        for slot in self._active_slots():
             if slot.state in {SlotState.READY, SlotState.PRELOADING, SlotState.ACTIVE}:
                 if slot.expected_generation == generation and source_matches_path(slot, norm_path):
                     return slot
         return None
 
+    def _find_loaded_slot_by_source(self, path: str):
+        norm_path = self._normalize_path(path)
+        for slot in self._active_slots():
+            if slot.state in {SlotState.READY, SlotState.PRELOADING, SlotState.ACTIVE}:
+                if source_matches_path(slot, norm_path):
+                    return slot
+        return None
+
     def _choose_slot(self):
-        for slot in self.slots:
+        for slot in self._active_slots():
             if slot.state in {SlotState.EMPTY, SlotState.STALE, SlotState.FAILED}:
                 return slot
-        for slot in self.slots:
+        for slot in self._active_slots():
             if slot.state != SlotState.ACTIVE:
                 return slot
-        return self.slots[0]
+        return self._active_slots()[0]
 
     def _demote_other_active_slots(self, active_slot):
-        for slot in self.slots:
+        for slot in self._active_slots():
             if slot is active_slot:
                 continue
             if slot.state == SlotState.ACTIVE:
                 slot.video_item.setOpacity(0.0)
                 slot.video_item.setZValue(0.0)
                 slot.audio.setMuted(True)
-                slot.state = SlotState.STALE
+                slot.player.pause()
+                slot.expected_generation = self.current_generation
+                slot.state = SlotState.READY
                 slot.role = SlotRole.SPARE
 
     def _arm_fallback(self):
@@ -158,6 +194,11 @@ class PlayerEngine:
         norm_path = self._normalize_path(path)
         self.current_generation = generation
         slot = self._find_valid_slot(norm_path, generation)
+        if slot is None:
+            slot = self._find_loaded_slot_by_source(norm_path)
+            if slot is not None:
+                slot.expected_generation = generation
+                self._set_slot_path(slot, norm_path)
         reused = slot is not None
 
         if slot is None:
@@ -165,7 +206,7 @@ class PlayerEngine:
             if slot.state != SlotState.EMPTY:
                 slot.clear()
             slot.player.setSource(_qurl_from_path(norm_path))
-            slot.expected_path = norm_path
+            self._set_slot_path(slot, norm_path)
             slot.expected_generation = generation
             slot.requested_start_pos = start_pos
             waiting = True
@@ -178,10 +219,15 @@ class PlayerEngine:
         slot.requested_start_pos = start_pos
         slot.audio.setMuted(not self.audio_enabled_getter())
         slot.video_item.setZValue(20.0)
+        slot.player.blockSignals(False)
         self.active_slot_id = slot.slot_id
+        if self.activate_slot_callback:
+            self.activate_slot_callback(slot)
 
         if waiting:
             self._arm_fallback()
+        else:
+            self.reveal_if_allowed(slot, "loaded", fallback_expired=True)
 
         if autoplay:
             slot.player.play()
@@ -207,17 +253,17 @@ class PlayerEngine:
 
     def _find_or_assign_neighbor_slot(self, path: str, generation: int, protected_slot_ids=None):
         protected_slot_ids = protected_slot_ids or set()
-        for slot in self.slots:
+        for slot in self._active_slots():
             if slot.slot_id in protected_slot_ids:
                 continue
             if self._slot_matches(slot, path, generation):
                 return slot
-        for slot in self.slots:
+        for slot in self._active_slots():
             if slot.slot_id in protected_slot_ids:
                 continue
             if slot.state == SlotState.EMPTY:
                 return slot
-        for slot in self.slots:
+        for slot in self._active_slots():
             if slot.slot_id in protected_slot_ids:
                 continue
             if slot.state not in {SlotState.ACTIVE, SlotState.READY}:
@@ -226,7 +272,7 @@ class PlayerEngine:
         return None
 
     def _prune_invalid_preloads(self, generation: int) -> None:
-        for slot in self.slots:
+        for slot in self._active_slots():
             if slot.state == SlotState.ACTIVE:
                 continue
             if slot.state not in {SlotState.PRELOADING, SlotState.READY, SlotState.STALE, SlotState.FAILED}:
@@ -245,7 +291,7 @@ class PlayerEngine:
             return
         if slot.state != SlotState.EMPTY:
             slot.clear()
-        slot.expected_path = norm_path
+        self._set_slot_path(slot, norm_path)
         slot.expected_generation = generation
         slot.requested_start_pos = item.start_pos
         slot.role = role
@@ -276,7 +322,7 @@ class PlayerEngine:
             if slot:
                 protected_slots.add(slot.slot_id)
 
-        for slot in self.slots:
+        for slot in self._active_slots():
             if slot.state == SlotState.ACTIVE:
                 continue
             if slot.slot_id in protected_slots:
@@ -324,7 +370,7 @@ class PlayerEngine:
         slot.audio.setMuted(True)
         slot.video_item.setOpacity(0.0)
         slot.video_item.setZValue(0.0)
-        slot.expected_path = None
+        self._set_slot_path(slot, None)
         slot.expected_generation = 0
         slot.requested_start_pos = 0
         slot.state = SlotState.FAILED

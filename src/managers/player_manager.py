@@ -132,6 +132,28 @@ class PlayerManager:
             raise IndexError(f"Player index out of range: {index}")
         return self.pools[self.current_mode][index]
 
+    def engine_slots(self):
+        from src.managers.player_engine import PlayerSlot
+
+        slots = []
+        slot_id = 0
+        for mode, pool in self.pools.items():
+            for pool_index, entry in enumerate(pool):
+                slots.append(
+                    PlayerSlot(
+                        slot_id=slot_id,
+                        mode=mode,
+                        pool_index=pool_index,
+                        player=entry["player"],
+                        audio=entry["audio"],
+                        video_item=entry["item"],
+                        expected_path=os.path.normpath(entry["path"]) if entry.get("path") else None,
+                        entry=entry,
+                    )
+                )
+                slot_id += 1
+        return slots
+
     def set_active_index(self, index):
         pool = self.pools[self.current_mode]
         if not 0 <= index < len(pool):
