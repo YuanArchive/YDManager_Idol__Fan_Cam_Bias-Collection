@@ -176,6 +176,12 @@ class PlayerEngine:
                     return slot
         return None
 
+    def _active_slot_matching_source(self, path: str):
+        slot = self.active_slot()
+        if slot is not None and slot.state == SlotState.ACTIVE and source_matches_path(slot, path):
+            return slot
+        return None
+
     def _choose_slot(self):
         for slot in self._active_slots():
             if slot.state in {SlotState.EMPTY, SlotState.STALE, SlotState.FAILED}:
@@ -186,7 +192,7 @@ class PlayerEngine:
         return self._active_slots()[0]
 
     def _demote_other_active_slots(self, active_slot):
-        for slot in self._active_slots():
+        for slot in self.slots:
             if slot is active_slot:
                 continue
             if slot.state == SlotState.ACTIVE:
@@ -258,12 +264,17 @@ class PlayerEngine:
     ) -> ActivationResult:
         norm_path = self._normalize_path(path)
         self.current_generation = generation
-        slot = self._find_valid_slot(norm_path, generation)
+        slot = self._active_slot_matching_source(norm_path)
         if slot is None:
-            slot = self._find_loaded_slot_by_source(norm_path)
-            if slot is not None:
-                slot.expected_generation = generation
-                self._set_slot_path(slot, norm_path)
+            slot = self._find_valid_slot(norm_path, generation)
+            if slot is None:
+                slot = self._find_loaded_slot_by_source(norm_path)
+                if slot is not None:
+                    slot.expected_generation = generation
+                    self._set_slot_path(slot, norm_path)
+        else:
+            slot.expected_generation = generation
+            self._set_slot_path(slot, norm_path)
         reused = slot is not None
 
         if slot is None:

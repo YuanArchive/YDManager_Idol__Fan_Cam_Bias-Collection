@@ -83,10 +83,10 @@ class FakeItem:
         self.z = z
 
 
-def make_slot(slot_id=0, path=None, state=SlotState.EMPTY, generation=0, role=SlotRole.SPARE):
+def make_slot(slot_id=0, path=None, state=SlotState.EMPTY, generation=0, role=SlotRole.SPARE, mode="main"):
     slot = PlayerSlot(
         slot_id=slot_id,
-        mode="main",
+        mode=mode,
         player=FakePlayer(),
         audio=FakeAudio(),
         video_item=FakeItem(),
@@ -262,6 +262,57 @@ class PlayerEngineActivationTest(unittest.TestCase):
         self.assertTrue(cleared)
         self.assertIsNone(engine.active_session())
         self.assertIsNone(engine.active_player())
+
+    def test_explicit_activation_in_new_mode_demotes_previous_active_slot(self):
+        current_mode = {"value": "A"}
+        main_slot = make_slot(0, "C:/videos/main.mp4", SlotState.ACTIVE, 1, SlotRole.CURRENT, mode="main")
+        a_slot = make_slot(1, mode="A")
+        engine = PlayerEngine(
+            slots=[main_slot, a_slot],
+            fallback_timer=FakeTimer(),
+            privacy_guard=FakePrivacy(False),
+            autoplay_getter=lambda: True,
+            audio_enabled_getter=lambda: True,
+            mode_getter=lambda: current_mode["value"],
+        )
+        engine.active_slot_id = main_slot.slot_id
+        engine.watch_session = WatchSession(
+            path=os.path.normpath("C:/videos/main.mp4"),
+            slot_id=main_slot.slot_id,
+            generation=1,
+            view_origin="main",
+            requested_start_pos=0,
+        )
+
+        engine.activate("C:/videos/a.mp4", start_pos=0, generation=2, autoplay=True, view_origin="A")
+
+        self.assertEqual(main_slot.state, SlotState.READY)
+        self.assertEqual(main_slot.role, SlotRole.SPARE)
+        self.assertEqual(main_slot.video_item.opacity, 0.0)
+        self.assertTrue(main_slot.audio.muted)
+        self.assertEqual(main_slot.player.pause_count, 1)
+        self.assertEqual(engine.active_slot_id, a_slot.slot_id)
+
+    def test_activating_same_path_keeps_existing_active_slot_across_modes(self):
+        current_mode = {"value": "A"}
+        main_slot = make_slot(0, "C:/videos/shared.mp4", SlotState.ACTIVE, 1, SlotRole.CURRENT, mode="main")
+        a_slot = make_slot(1, mode="A")
+        engine = PlayerEngine(
+            slots=[main_slot, a_slot],
+            fallback_timer=FakeTimer(),
+            privacy_guard=FakePrivacy(False),
+            autoplay_getter=lambda: True,
+            audio_enabled_getter=lambda: True,
+            mode_getter=lambda: current_mode["value"],
+        )
+        engine.active_slot_id = main_slot.slot_id
+
+        result = engine.activate("C:/videos/shared.mp4", start_pos=3000, generation=2, autoplay=True, view_origin="A")
+
+        self.assertEqual(result.slot_id, main_slot.slot_id)
+        self.assertTrue(result.reused_source)
+        self.assertEqual(len(a_slot.player.set_source_calls), 0)
+        self.assertEqual(engine.active_session().slot_id, main_slot.slot_id)
 
     def test_activation_uses_only_current_mode_slots(self):
         trash_slot = PlayerSlot(
