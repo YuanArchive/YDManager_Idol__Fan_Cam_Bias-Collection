@@ -53,3 +53,36 @@ def choose_random_start_candidate(
     best = [timestamp for timestamp, score in candidates if score == max_score]
     rng = random.Random(seed)
     return rng.choice(best)
+
+
+def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
+    return max(low, min(high, value))
+
+
+def frame_quality_score(
+    brightness: float,
+    contrast: float,
+    blur: float,
+    similarity: float,
+) -> float:
+    brightness_score = _clamp((brightness - 8.0) / 100.0)
+    contrast_score = _clamp(contrast / 45.0)
+    blur_score = _clamp(blur / 160.0)
+    distinct_score = _clamp(1.0 - similarity)
+    return round(
+        brightness_score * 0.35
+        + contrast_score * 0.25
+        + blur_score * 0.20
+        + distinct_score * 0.20,
+        4,
+    )
+
+
+def choose_replacement_timestamp(
+    original_ms: int,
+    duration_ms: int,
+    attempt_index: int,
+) -> int:
+    offsets = [1500, -1500, 3000, -3000, 5000, -5000]
+    offset = offsets[attempt_index % len(offsets)]
+    return max(0, min(duration_ms, original_ms + offset))

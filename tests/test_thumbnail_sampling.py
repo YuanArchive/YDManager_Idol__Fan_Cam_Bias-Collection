@@ -2,6 +2,8 @@ import unittest
 
 from src.managers.thumbnail_sampling import (
     choose_random_start_candidate,
+    choose_replacement_timestamp,
+    frame_quality_score,
     sample_timestamps,
 )
 
@@ -31,3 +33,24 @@ class ThumbnailSamplingTest(unittest.TestCase):
 
     def test_random_start_returns_none_without_candidates(self):
         self.assertIsNone(choose_random_start_candidate([], [], duration_ms=10000, seed=1))
+
+
+class ThumbnailQualityTest(unittest.TestCase):
+    def test_black_frame_scores_low(self):
+        score = frame_quality_score(brightness=2.0, contrast=1.0, blur=50.0, similarity=0.1)
+
+        self.assertLess(score, 0.3)
+
+    def test_clear_distinct_frame_scores_high(self):
+        score = frame_quality_score(brightness=120.0, contrast=45.0, blur=180.0, similarity=0.25)
+
+        self.assertGreater(score, 0.7)
+
+    def test_replacement_stays_near_original_time(self):
+        replacement = choose_replacement_timestamp(
+            original_ms=10000,
+            duration_ms=60000,
+            attempt_index=1,
+        )
+
+        self.assertTrue(7000 <= replacement <= 13000)
