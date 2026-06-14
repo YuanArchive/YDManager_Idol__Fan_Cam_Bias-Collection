@@ -229,7 +229,6 @@ def _make_direction_window(self):
     window = type("FakeWindow", (), {"setWindowTitle": lambda self, title: setattr(self, "title", title)})()
     window.file_list = FakePlayableList()
     window.scan_timer = FakeTimer()
-    window.preload_timer = FakeTimer()
     window.seek_safety_timer = FakeTimer()
     window.is_waiting_for_seek = False
     window.chk_random = FakeCheck(False)

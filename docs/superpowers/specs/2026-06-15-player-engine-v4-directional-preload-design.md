@@ -20,7 +20,7 @@ The app should still preserve the active watch session across passive menu chang
 
 This is safe and deterministic, but it is not ideal for rapid one-direction browsing. With a three-player pool, the engine can keep only two non-active candidates. When the user repeatedly moves forward, keeping the previous row resident consumes a slot that could instead preload the next-next row.
 
-Legacy methods such as `preload_next_file(...)` and `_execute_media_load(...)` still exist for compatibility/tests, but the current production playback path uses `PlayerEngine.plan_neighbors(...)`.
+Legacy methods such as `preload_next_file(...)` and `_execute_media_load(...)` were removed after v4 because they directly loaded `QMediaPlayer` sources outside `PlayerEngine`. The production playback path now uses `PlayerEngine.activate(...)` and `PlayerEngine.plan_neighbors(...)`.
 
 ## Approaches Considered
 

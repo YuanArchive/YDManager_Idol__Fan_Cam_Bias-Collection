@@ -104,11 +104,6 @@ class VideoSorter(QMainWindow):
         self.index_refresh_timer.setSingleShot(True)
         self.index_refresh_timer.timeout.connect(self.load_files)
 
-        # 프리로드 타이머 (버퍼링 최소화)
-        self.preload_timer = QTimer()
-        self.preload_timer.setSingleShot(True)
-        self.preload_timer.timeout.connect(self._run_preload)
-
         # 탐색 안전 타이머 (화면 깜빡임 방지)
         self.seek_safety_timer = QTimer()
         self.seek_safety_timer.setSingleShot(True)
@@ -942,7 +937,6 @@ class VideoSorter(QMainWindow):
 
     def _prepare_playback(self, index: int) -> Tuple[Optional[str], Optional[QListWidgetItem]]:
         self.scan_timer.stop()
-        self.preload_timer.stop()
         self.seek_safety_timer.stop()
         self.is_waiting_for_seek = False
         
@@ -961,92 +955,6 @@ class VideoSorter(QMainWindow):
         
         saved_pos = item.data(Qt.ItemDataRole.UserRole + 1)
         return int(saved_pos) if saved_pos is not None else 0
-
-    def _sync_player_layers(self, active_data: dict):
-        """[버그 수정] 파일 전환 시 이전 플레이어를 확실히 정지시킵니다."""
-        current_mode = self.player_manager.current_mode
-        pool = self.player_manager.pools[current_mode]
-        
-        # [DEBUG] 플레이어 교체 로그
-        active_idx = pool.index(active_data)
-        # print(f"[DEBUG] _sync_player_layers: Active Player -> {active_idx}")
-        
-        for i, p_data in enumerate(pool):
-            player = p_data['player']
-            
-            if p_data == active_data:
-                # 새로 활성화될 플레이어 설정
-                player.blockSignals(False)
-                p_data['audio'].setMuted(not self.chk_audio.isChecked())
-                p_data['item'].setZValue(20.0)  # 주인공은 맨 위로
-            else:
-                # [핵심 수정] 이전 플레이어를 즉시 정지 및 화면 숨김
-                # print(f"[DEBUG]   Killing Player {i}: {p_data['path']}")
-                player.blockSignals(True)
-                player.stop()
-                player.setSource(QUrl())  # 소스 해제
-                p_data['audio'].setMuted(True)
-                p_data['item'].setOpacity(0.0)
-                p_data['item'].setZValue(0.0)
-                p_data['path'] = None
-
-    def _execute_media_load(self, active_data: dict, target_path: str):
-        """[수정됨] 자동 재생 해제 시에도 화면이 나오도록 강제 렌더링 및 안전장치 가동"""
-        norm_path = os.path.normpath(target_path)
-        curr_path = os.path.normpath(active_data['path']) if active_data['path'] else ""
-        
-        self.video_view.set_info_visible(False)
-        is_playing = self.conf_auto_play
-        is_privacy_on = getattr(self, 'conf_privacy_mode', False)
-        
-        if is_privacy_on and not is_playing:
-            self.setWindowTitle("YDManager")
-        else:
-            self.setWindowTitle(f"재생: {os.path.basename(target_path)}")
-
-        # [1] 경로 변경 여부에 따른 분기
-        if norm_path != curr_path:
-            # 새로운 파일: 로딩 전까지 숨김 (깜빡임 방지)
-            active_data['path'] = target_path
-            active_data['item'].setOpacity(0.0) 
-            active_data['player'].setSource(QUrl.fromLocalFile(target_path))
-            
-            # [Fix 1] 신호가 안 올 경우를 대비해 안전장치 타이머 가동 (최대 1.5초 뒤 강제 표시)
-            self.is_waiting_for_seek = True
-            self.seek_safety_timer.start()
-        else:
-            # 프리로드 적중: 이미 로드된 상태면 바로 표시
-            status = active_data['player'].mediaStatus()
-            if status in [QMediaPlayer.MediaStatus.BufferedMedia, QMediaPlayer.MediaStatus.LoadedMedia]:
-                 active_data['item'].setOpacity(1.0)
-        
-        active_data['player'].setPlaybackRate(self.playback_rate)
-        
-        # [2] 재생 또는 정지 상태 처리
-        if self.target_start_pos != 0:
-            # 저장된 위치나 랜덤 위치로 이동하는 경우
-            if active_data['player'].duration() > 0:
-                self._handle_immediate_seek(active_data)
-            else:
-                # 메타데이터가 아직 로드되지 않았다면 시그널을 기다림
-                self.is_waiting_for_seek = True
-                self.seek_safety_timer.start()
-        else:
-            # 처음부터 재생하는 경우
-            if self.conf_auto_play:
-                active_data['player'].play()
-            else:
-                # [Fix 2] 자동 재생이 꺼져 있어도 0초 위치로 강제 이동하여 첫 프레임 렌더링 유도
-                active_data['player'].setPosition(0)
-                # 만약 로딩이 매우 빠르면 여기서 바로 보여주기 위해 타이머 체크
-                if active_data['player'].mediaStatus() == QMediaPlayer.MediaStatus.LoadedMedia:
-                     active_data['item'].setOpacity(1.0)
-
-        if self.conf_auto_play and self.chk_autoscan.isChecked():
-            self.scan_timer.start()
-        else:
-            self.scan_timer.stop()
-        self.preload_timer.start(50)
 
     def _handle_immediate_seek(self, active_data):
         if self.target_start_pos == -1:
@@ -1069,65 +977,6 @@ class VideoSorter(QMainWindow):
             self.scan_timer.start()
         else:
             self.scan_timer.stop()
-            
-    def preload_next_file(self, current_index: int) -> None:
-        """다음/이전 영상을 백그라운드 플레이어에 미리 로드"""
-        if self.file_list.count() == 0: return 
-        
-        next_idx = current_index + 1 if current_index + 1 < self.file_list.count() else -1
-        prev_idx = current_index - 1 if current_index - 1 >= 0 else -1
-        
-        targets = []
-        is_random = self.chk_random.isChecked()
-
-        for idx in [next_idx, prev_idx]:
-            if idx != -1:
-                item = self.file_list.item(idx)
-                if item is None: continue
-
-                path = item.data(Qt.ItemDataRole.UserRole)
-                if not path: continue
-
-                if is_random:
-                    target_pos = -1 
-                else:
-                    saved_pos = item.data(Qt.ItemDataRole.UserRole + 1)
-                    target_pos = int(saved_pos) if saved_pos is not None else 0
-                    
-                targets.append((path, target_pos))
-
-        idle_indices = self.player_manager.get_idle_players()
-        
-        for path, pos in targets:
-            if not idle_indices: break 
-            
-            already_has = -1
-            for idx in idle_indices:
-                p_data = self.player_manager.get_player_by_index(idx)
-                if p_data['path'] and os.path.normpath(p_data['path']) == os.path.normpath(path):
-                    already_has = idx; break
-            
-            if already_has != -1:
-                idle_indices.remove(already_has)
-                continue
-            
-            worker_idx = idle_indices.pop(0)
-            p_data = self.player_manager.get_player_by_index(worker_idx)
-            
-            p_data['item'].setOpacity(0.0)
-            p_data['audio'].setMuted(True)
-            p_data['path'] = path
-            p_data['player'].setSource(QUrl.fromLocalFile(path))
-            p_data['player'].pause() 
-            
-            if pos > 0:
-                p_data['player'].setPosition(pos)
-
-    def _run_preload(self):
-        # 현재 재생 중인 인덱스 기준으로 프리로드
-        curr_row = self.file_list.currentRow()
-        if curr_row >= 0:
-            self.preload_next_file(curr_row)
             
     def _force_show_screen(self):
         """탐색 지연 시 강제로 화면 표시"""

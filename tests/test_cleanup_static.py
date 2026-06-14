@@ -31,6 +31,26 @@ class CleanupStaticTest(unittest.TestCase):
                     with self.subTest(path=path, line=node.lineno):
                         self.assertEqual(len(imported_names), len(set(imported_names)))
 
+    def test_main_does_not_keep_legacy_direct_preload_pipeline(self):
+        main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+
+        legacy_symbols = [
+            "preload_timer",
+            "_sync_player_layers",
+            "_execute_media_load",
+            "preload_next_file",
+            "_run_preload",
+        ]
+
+        for symbol in legacy_symbols:
+            with self.subTest(symbol=symbol):
+                self.assertNotIn(symbol, main_source)
+
+    def test_file_actions_do_not_reload_media_sources_directly(self):
+        source = (ROOT / "src" / "controllers" / "file_action_controller.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("QUrl.fromLocalFile", source)
+
 
 if __name__ == "__main__":
     unittest.main()

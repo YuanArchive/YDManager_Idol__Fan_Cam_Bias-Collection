@@ -286,7 +286,6 @@ class PlayerEngineIntegrationTest(unittest.TestCase):
         window = type("FakeWindow", (), {"setWindowTitle": lambda self, title: setattr(self, "title", title)})()
         window.file_list = FakePlayableList()
         window.scan_timer = FakeTimer()
-        window.preload_timer = FakeTimer()
         window.seek_safety_timer = FakeTimer()
         window.is_waiting_for_seek = False
         window.chk_random = FakeCheck(False)
@@ -310,7 +309,6 @@ class PlayerEngineIntegrationTest(unittest.TestCase):
         window = type("FakeWindow", (), {"setWindowTitle": lambda self, title: setattr(self, "title", title)})()
         window.file_list = FakePlayableList()
         window.scan_timer = FakeTimer()
-        window.preload_timer = FakeTimer()
         window.seek_safety_timer = FakeTimer()
         window.is_waiting_for_seek = False
         window.chk_random = FakeCheck(False)
@@ -1162,41 +1160,6 @@ class VideoSorterSearchTest(unittest.TestCase):
         self.assertTrue(window.index_refresh_timer.started)
         self.assertTrue(window.file_list.updates_enabled)
 
-    def test_zero_start_new_media_sets_fallback_wait_flag_until_force_show(self):
-        class FakeWindow:
-            def setWindowTitle(self, title):
-                self.title = title
-
-        item = FakeVideoItem()
-        active_data = {
-            "path": None,
-            "item": item,
-            "player": FakeLoadPlayer(),
-        }
-        window = FakeWindow()
-        window.video_view = FakeVideoView()
-        window.conf_auto_play = False
-        window.conf_privacy_mode = False
-        window.target_start_pos = 0
-        window.seek_safety_timer = FakeTimer()
-        window.playback_rate = 1.0
-        window.chk_autoscan = FakeCheck(False)
-        window.scan_timer = FakeTimer()
-        window.preload_timer = FakeTimer()
-        window.is_waiting_for_seek = False
-        window.player_manager = FakePlayerManager(active_data)
-
-        VideoSorter._execute_media_load(window, active_data, "C:/videos/new.mp4")
-
-        self.assertTrue(window.is_waiting_for_seek)
-        self.assertEqual(item.opacity, 0.0)
-        self.assertTrue(window.seek_safety_timer.started)
-
-        VideoSorter._force_show_screen(window)
-
-        self.assertFalse(window.is_waiting_for_seek)
-        self.assertEqual(item.opacity, 1.0)
-
     def test_reset_viewer_state_clears_active_player_path(self):
         active_data = {
             "path": "C:/videos/sample.mp4",
@@ -1214,28 +1177,6 @@ class VideoSorterSearchTest(unittest.TestCase):
         self.assertEqual(active_data["player"].stop_count, 1)
         self.assertTrue(active_data["player"].source_set.isEmpty())
         self.assertEqual(active_data["item"].opacity, 0.0)
-
-    def test_autoscan_timer_does_not_start_when_auto_play_is_disabled(self):
-        active_data = {
-            "path": None,
-            "item": FakeVideoItem(),
-            "player": FakeLoadPlayer(),
-        }
-        window = type("FakeWindow", (), {"setWindowTitle": lambda self, title: None})()
-        window.video_view = FakeVideoView()
-        window.conf_auto_play = False
-        window.conf_privacy_mode = False
-        window.target_start_pos = 0
-        window.seek_safety_timer = FakeTimer()
-        window.playback_rate = 1.0
-        window.chk_autoscan = FakeCheck(True)
-        window.scan_timer = FakeTimer()
-        window.preload_timer = FakeTimer()
-        window.is_waiting_for_seek = False
-
-        VideoSorter._execute_media_load(window, active_data, "C:/videos/new.mp4")
-
-        self.assertFalse(window.scan_timer.started)
 
     def test_seek_does_not_start_autoscan_when_auto_play_is_disabled(self):
         window = type("FakeWindow", (), {})()
