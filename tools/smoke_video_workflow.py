@@ -101,6 +101,21 @@ def run_smoke():
             active_source = window.player.source().toLocalFile()
             _assert(_norm(active_source) == _norm(first_loaded), "play_video did not load the selected source")
 
+            window.play_video(1)
+            _pump_events(app, 1000)
+            second_loaded = Path(window.file_list.item(1).data(Qt.ItemDataRole.UserRole))
+            _assert(
+                _norm(window.player_engine.active_player().source().toLocalFile()) == _norm(second_loaded),
+                "player engine did not promote the second selected source",
+            )
+
+            window.play_video(0)
+            _pump_events(app, 1000)
+            _assert(
+                _norm(window.player_engine.active_player().source().toLocalFile()) == _norm(first_loaded),
+                "player engine did not return to the first selected source",
+            )
+
             window.toggle_tag_file("A")
             _pump_events(app, 250)
             first_key = window.file_manager._get_norm_key(str(first_loaded))

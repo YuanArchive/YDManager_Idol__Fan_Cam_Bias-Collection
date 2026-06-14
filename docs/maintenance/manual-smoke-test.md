@@ -76,6 +76,18 @@ See `docs/maintenance/playback-state.md` for the player mode and file-release ru
 - Restore another trash item and verify it appears in the main list.
 - Close and relaunch the app; verify folder history, tags, trash, and highlights persist under `%LOCALAPPDATA%\YDManager\index`.
 
+## Player Engine v2 Manual Smoke
+
+- [ ] Load two or more H.264/AAC videos outside the repository.
+- [ ] Press Down/Up rapidly and confirm the selected video source follows the visible row.
+- [ ] Confirm next/previous transitions do not show a persistent black screen.
+- [ ] Pause with privacy mode enabled and confirm video/list/title are hidden.
+- [ ] Disable auto-play with privacy mode enabled and select another video; confirm no video is revealed until visible playback is requested.
+- [ ] Rename the active video with `#` and confirm playback can resume from the renamed path.
+- [ ] Soft delete the active video and confirm the next row plays once, not twice.
+- [ ] Hard delete the active video and confirm no file-lock error occurs.
+- [ ] Enter search, play a result, clear search, and confirm active source remains valid.
+
 ## Shortcut And Privacy Workflow
 
 - Press `Tab` repeatedly and verify focus cycles through the expected panels.

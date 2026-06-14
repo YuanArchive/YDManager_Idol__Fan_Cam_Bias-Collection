@@ -73,6 +73,7 @@
 - Release audit now checks git candidate files for generated artifact roots and local machine path leakage.
 - Cleanup static tests now guard against duplicated startup display logs and repeated names in import statements.
 - Parallel code review found no critical issues; its important stale-count and malformed soft-delete/restore findings are addressed.
+- Player Engine v2 introduces explicit slot state, generation guards, preload promotion, path/source reveal validation, and privacy-aware reveal checks.
 
 ## Remaining Release Risks
 
