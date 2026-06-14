@@ -81,8 +81,11 @@ For each indexed video, generate a small strip of scene thumbnails:
 
 Keep it restrained:
 
-- show a compact thumbnail strip in the right-side player area when a row is selected but not playing;
-- show the strip in highlight/detail context;
+- show a compact vertical thumbnail rail on the far right of the player area;
+- keep thumbnails outside the video surface so the 16:9 player is not covered;
+- show about 12 small 16:9 frames for the active or selected video;
+- allow clicking a thumbnail to seek to that timestamp;
+- show a passive generating state while thumbnails are being created;
 - optionally show one preview thumbnail in the list only if performance stays good.
 
 ### Why It Matters
