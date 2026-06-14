@@ -468,6 +468,43 @@ class PassiveListRefreshTest(unittest.TestCase):
         self.assertEqual(window.file_list.current_row, 0)
         self.assertEqual(window.play_calls, [])
 
+    def test_change_view_mode_requests_preserve_refresh(self):
+        class FileManager:
+            current_mode = "main"
+            is_trash_mode = False
+            filter_type = None
+
+            def set_search_keyword(self, value):
+                self.search_keyword = value
+
+            def set_view_state(self, mode, filter_type, is_trash):
+                self.view_state = (mode, filter_type, is_trash)
+
+        class Input:
+            def blockSignals(self, blocked):
+                pass
+
+            def clear(self):
+                self.cleared = True
+
+        class Button:
+            def setChecked(self, value):
+                self.checked = value
+
+        window = type("FakeWindow", (), {})()
+        window.file_manager = FileManager()
+        window.input_search = Input()
+        window.btn_filter_a = Button()
+        window.btn_filter_b = Button()
+        window.save_main_state = lambda: setattr(window, "saved_main", True)
+        window.update_calls = []
+        window.update_ui_mode = lambda activation_policy="auto_if_no_watch": window.update_calls.append(activation_policy)
+
+        VideoSorter._change_view_mode(window, "highlight", None, False)
+
+        self.assertEqual(window.update_calls, ["preserve"])
+        self.assertTrue(window.saved_main)
+
 
 class FakeStatusEngine:
     def __init__(self, active_player, revealed=True, active_path=None):

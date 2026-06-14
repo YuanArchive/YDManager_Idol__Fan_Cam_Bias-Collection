@@ -541,7 +541,7 @@ class VideoSorter(QMainWindow):
         self.btn_filter_b.setChecked(False)
         
         # 4. UI 업데이트 실행
-        self.update_ui_mode()
+        self.update_ui_mode(activation_policy="preserve")
 
     def go_to_main_mode(self):
         # 이미 메인 모드라면 버튼만 체크하고 리턴
@@ -580,7 +580,7 @@ class VideoSorter(QMainWindow):
             return
         self._change_view_mode('trash', None, True)
 
-    def update_ui_mode(self):
+    def update_ui_mode(self, activation_policy: str = "auto_if_no_watch"):
         """현재 상태(mode, filter)에 따라 파일 리스트와 UI 위젯을 갱신합니다."""
         mode = self.file_manager.current_mode
         f_type = self.file_manager.filter_type
@@ -593,7 +593,7 @@ class VideoSorter(QMainWindow):
         else: target_mode = 'main'
         
         # 플레이어 모드 전환 (화면 레이어 정리)
-        self.player_manager.switch_mode(target_mode)
+        self.player_manager.switch_mode(target_mode, preserve_current=True)
 
         self.file_list.blockSignals(True)
         self.file_list.clear()
@@ -656,7 +656,7 @@ class VideoSorter(QMainWindow):
                 self.folder_list_widget.setCurrentRow(-1)
         # [버그 수정 코드 끝] -------------------------------------------------------
 
-        # 스크롤 이동 및 자동 재생 로직
+        # 스크롤 이동 및 재생 활성화 정책
         if self.file_list.count() > 0:
             self.video_view.set_progressbar_visible(True)
             
@@ -665,31 +665,13 @@ class VideoSorter(QMainWindow):
                 self.file_list.blockSignals(False)
                 return 
 
-            if target_mode == 'main':
-                # 이전 위치 기억 후 복원
-                target_row = 0
-                if self.last_main_path:
-                    for i in range(self.file_list.count()):
-                        if self.file_list.item(i).data(Qt.ItemDataRole.UserRole) == self.last_main_path:
-                            target_row = i; break
-                else:
-                    target_row = max(0, min(self.last_main_row, self.file_list.count() - 1))
-                
-                self.file_list.setCurrentRow(target_row)
-                
-                # [UX] 선택된 아이템을 화면 중앙으로 스크롤
-                currentItem = self.file_list.item(target_row)
-                self.file_list.scrollToItem(currentItem, QAbstractItemView.ScrollHint.PositionAtCenter)
-                
-                start_pos = self.last_main_pos if self.last_main_pos > 0 else 0
-                # play_video는 3단계에서 정의되지만 호출은 가능
-                self.play_video(target_row, specific_start_pos=start_pos)
-            else:
-                self.file_list.setCurrentRow(0)
-                self.play_video(0)
+            VideoSorter._maybe_activate_after_list_refresh(self, target_mode, activation_policy)
         else:
-            self.video_view.set_progressbar_visible(False)
-            self.reset_viewer_state()
+            if VideoSorter._has_active_watch_session(self):
+                self.video_view.set_progressbar_visible(True)
+            else:
+                self.video_view.set_progressbar_visible(False)
+                self.reset_viewer_state()
             
         self.file_list.blockSignals(False)
 
