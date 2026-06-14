@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from dataclasses import dataclass
 
+from PyQt6.QtCore import QObject, pyqtSignal
+
 from src.core import consts
-from src.managers.thumbnail_sampling import choose_random_start_candidate
+from src.core.thumbnail_threads import ThumbnailWorker
+from src.managers.thumbnail_sampling import choose_random_start_candidate, sample_timestamps
 from src.ui.thumbnail_rail import ThumbnailCell
 
 
@@ -16,12 +20,18 @@ class ThumbnailJob:
     priority: str
 
 
-class ThumbnailTimelineManager:
+class ThumbnailTimelineManager(QObject):
+    timeline_ready = pyqtSignal(str, list)
+    timeline_failed = pyqtSignal(str, str)
+
     def __init__(self):
+        super().__init__()
         self.manifest_path = consts.THUMBNAIL_MANIFEST_FILE
         self.cache_dir = consts.THUMBNAIL_CACHE_DIR
         self.manifest = self._load_manifest()
         self.pending_jobs = []
+        self.active_worker = None
+        self.active_job_context = None
 
     def _path_key(self, path: str) -> str:
         return os.path.normcase(os.path.normpath(path))
@@ -120,6 +130,65 @@ class ThumbnailTimelineManager:
             "files": list(files),
         }
         self._save_manifest()
+
+    def _cache_id_for(self, path: str) -> str:
+        try:
+            stat = os.stat(path)
+            raw = f"{self._path_key(path)}|{stat.st_size}|{stat.st_mtime_ns}"
+        except OSError:
+            raw = self._path_key(path)
+        return hashlib.sha1(raw.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+    def start_next_job(self, worker_factory=ThumbnailWorker, autostart: bool = True):
+        if self.active_worker is not None:
+            return self.active_worker
+        if not self.pending_jobs:
+            return None
+
+        job = self.pending_jobs.pop(0)
+        if not job.duration_ms or job.duration_ms <= 0:
+            return None
+
+        timestamps = sample_timestamps(job.duration_ms)
+        cache_id = self._cache_id_for(job.path)
+        output_dir = os.path.join(self.cache_dir, cache_id)
+        worker = worker_factory(job.path, timestamps, output_dir)
+        self.active_worker = worker
+        self.active_job_context = {
+            "path": job.path,
+            "duration_ms": job.duration_ms,
+            "cache_id": cache_id,
+            "timestamps_ms": timestamps,
+        }
+        worker.finished_path.connect(self._on_worker_finished)
+        worker.failed_path.connect(self._on_worker_failed)
+        if autostart:
+            worker.start()
+        return worker
+
+    def _on_worker_finished(self, path: str, files: list[str]) -> None:
+        context = self.active_job_context
+        if not context or self._path_key(path) != self._path_key(context["path"]):
+            return
+        self.record_completed_timeline(
+            path=path,
+            duration_ms=int(context["duration_ms"]),
+            cache_id=str(context["cache_id"]),
+            timestamps_ms=list(context["timestamps_ms"]),
+            files=list(files),
+            quality_scores=[0.8 for _ in files],
+        )
+        cells = self.cached_cells(path)
+        self.active_worker = None
+        self.active_job_context = None
+        self.timeline_ready.emit(path, cells)
+        self.start_next_job()
+
+    def _on_worker_failed(self, path: str, error: str) -> None:
+        self.active_worker = None
+        self.active_job_context = None
+        self.timeline_failed.emit(path, error)
+        self.start_next_job()
 
     def request_timeline(
         self,

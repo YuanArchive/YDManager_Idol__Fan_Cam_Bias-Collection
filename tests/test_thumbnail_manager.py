@@ -136,3 +136,80 @@ class ThumbnailTimelineManagerTest(unittest.TestCase):
         reloaded = ThumbnailTimelineManager()
 
         self.assertEqual(len(reloaded.cached_cells(path)), 12)
+
+    def test_start_next_job_builds_worker_with_sampled_timestamps(self):
+        path = self.make_video()
+        manager = ThumbnailTimelineManager()
+        captured = {}
+
+        class FakeSignal:
+            def connect(self, callback):
+                self.callback = callback
+
+        class FakeWorker:
+            def __init__(self, job_path, timestamps_ms, output_dir):
+                captured["path"] = job_path
+                captured["timestamps_ms"] = timestamps_ms
+                captured["output_dir"] = output_dir
+                self.finished_path = FakeSignal()
+                self.failed_path = FakeSignal()
+
+            def start(self):
+                captured["started"] = True
+
+        manager.request_timeline(path, duration_ms=120000, priority="active")
+
+        worker = manager.start_next_job(worker_factory=FakeWorker, autostart=False)
+
+        self.assertIs(worker, manager.active_worker)
+        self.assertEqual(captured["path"], path)
+        self.assertEqual(len(captured["timestamps_ms"]), 12)
+        self.assertTrue(captured["output_dir"].startswith(self.cache_dir))
+        self.assertNotIn("started", captured)
+
+    def test_finished_worker_records_manifest_and_clears_active_worker(self):
+        path = self.make_video()
+        manager = ThumbnailTimelineManager()
+        emitted_ready = []
+        worker_box = {}
+
+        class FakeSignal:
+            def __init__(self):
+                self.callbacks = []
+
+            def connect(self, callback):
+                self.callbacks.append(callback)
+
+            def emit(self, *args):
+                for callback in self.callbacks:
+                    callback(*args)
+
+        class FakeWorker:
+            def __init__(self, job_path, timestamps_ms, output_dir):
+                self.path = job_path
+                self.timestamps_ms = timestamps_ms
+                self.output_dir = output_dir
+                self.finished_path = FakeSignal()
+                self.failed_path = FakeSignal()
+                worker_box["worker"] = self
+
+            def start(self):
+                pass
+
+        manager.timeline_ready.connect(lambda ready_path, cells: emitted_ready.append((ready_path, cells)))
+        manager.request_timeline(path, duration_ms=120000, priority="active")
+        worker = manager.start_next_job(worker_factory=FakeWorker, autostart=False)
+        os.makedirs(worker.output_dir, exist_ok=True)
+        files = []
+        for index in range(12):
+            name = f"{index:03d}.jpg"
+            with open(os.path.join(worker.output_dir, name), "wb") as file:
+                file.write(b"jpg")
+            files.append(name)
+
+        worker.finished_path.emit(path, files)
+
+        self.assertIsNone(manager.active_worker)
+        self.assertEqual(len(manager.cached_cells(path)), 12)
+        self.assertEqual(emitted_ready[0][0], path)
+        self.assertEqual(len(emitted_ready[0][1]), 12)

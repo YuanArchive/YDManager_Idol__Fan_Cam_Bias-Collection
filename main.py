@@ -31,6 +31,7 @@ from src.ui.settings_ui import SettingsDialog
 from src.managers.file_manager import FileManager
 from src.managers.settings_manager import SettingsManager
 from src.managers.thumbnail_manager import ThumbnailTimelineManager
+from src.managers.thumbnail_sampling import sample_timestamps
 from src.core import consts
 from src.utils.utils_font import load_fonts
 from src.ui.ui_layout import init_ui
@@ -39,6 +40,7 @@ from src.managers.player_engine import PlaybackItem, PlayerEngine, SlotState
 from src.core.event_handler import ShortcutHandler, GlobalAppFilter
 from src.core.signal_setup import setup_app_connections
 from src.ui.ui_components import ThemeMessageBox, ProVideoView
+from src.ui.thumbnail_rail import ThumbnailCell
 from src.controllers.file_action_controller import FileActionController
 from src.utils.utils_logger import get_logger, set_log_privacy_mode
 
@@ -75,6 +77,7 @@ class VideoSorter(QMainWindow):
         self.settings = SettingsManager()
         self.file_manager = FileManager()
         self.thumbnail_manager = ThumbnailTimelineManager()
+        self.thumbnail_manager.timeline_ready.connect(self._on_thumbnail_timeline_ready)
         
         # 윈도우 설정
         self.setAcceptDrops(True)
@@ -989,6 +992,53 @@ class VideoSorter(QMainWindow):
     def seek_to_thumbnail(self, timestamp_ms: int) -> None:
         self._execute_seek_and_play(int(timestamp_ms))
 
+    def _highlight_times_for_path(self, path: str | None) -> list[int]:
+        if not path or not hasattr(self, "file_manager"):
+            return []
+        try:
+            key = self.file_manager._get_norm_key(path)
+            if hasattr(self.file_manager, "_sanitize_highlight_times"):
+                return list(self.file_manager._sanitize_highlight_times(key))
+            values = getattr(self.file_manager, "highlights", {}).get(key, [])
+        except Exception:
+            return []
+        return [
+            int(value)
+            for value in values
+            if not isinstance(value, bool) and isinstance(value, (int, float)) and value >= 0
+        ]
+
+    def _loading_thumbnail_cells(self, duration_ms: int | None) -> list[ThumbnailCell]:
+        return [
+            ThumbnailCell(index=index, timestamp_ms=timestamp, image_path=None, state="loading")
+            for index, timestamp in enumerate(sample_timestamps(duration_ms))
+        ]
+
+    def _sync_thumbnail_rail(self, path: str | None, duration_ms: int | None) -> None:
+        if not path or not hasattr(self, "thumbnail_rail"):
+            return
+        manager = getattr(self, "thumbnail_manager", None)
+        if manager is None:
+            return
+
+        cells = manager.cached_cells(path)
+        if cells:
+            self.thumbnail_rail.set_cells(cells)
+            self.thumbnail_rail.set_highlights(VideoSorter._highlight_times_for_path(self, path))
+            return
+
+        self.thumbnail_rail.set_cells(VideoSorter._loading_thumbnail_cells(self, duration_ms))
+        self.thumbnail_rail.set_highlights([])
+        manager.request_timeline(path, duration_ms=duration_ms, priority="active")
+        manager.start_next_job()
+
+    def _on_thumbnail_timeline_ready(self, path: str, cells: list[ThumbnailCell]) -> None:
+        if not VideoSorter.is_active_watch_path(self, path):
+            return
+        if hasattr(self, "thumbnail_rail"):
+            self.thumbnail_rail.set_cells(cells)
+            self.thumbnail_rail.set_highlights(VideoSorter._highlight_times_for_path(self, path))
+
     def _thumbnail_random_start_candidate(
         self,
         path: str | None,
@@ -1116,11 +1166,12 @@ class VideoSorter(QMainWindow):
         active_duration = active_player.duration()
         self.video_view.set_duration(active_duration)
         active_slot = self.player_engine.active_slot()
-        self._show_active_media_ready(getattr(active_slot, "expected_path", None))
+        active_path = getattr(active_slot, "expected_path", None)
+        self._show_active_media_ready(active_path)
+        VideoSorter._sync_thumbnail_rail(self, active_path, active_duration)
 
         if self.target_start_pos == -1:
             if active_duration > 0:
-                active_path = getattr(active_slot, "expected_path", None)
                 if not VideoSorter._consume_initial_seek_once(self, active_slot, active_path):
                     return
                 candidate = self._thumbnail_random_start_candidate(active_path, duration_ms=active_duration)

@@ -7,6 +7,7 @@ from PyQt6.QtMultimedia import QMediaPlayer
 
 from main import VideoSorter
 from src.managers.player_engine import SlotState
+from src.ui.thumbnail_rail import ThumbnailCell
 
 
 class FakeTimer:
@@ -738,6 +739,70 @@ class ThumbnailPreviewCoordinatorTest(unittest.TestCase):
         self.assertEqual(window.candidate_path, "C:/videos/a.mp4")
         self.assertEqual(window.candidate_duration, 90000)
         self.assertEqual(window.seek_calls, [22222])
+
+    def test_sync_thumbnail_rail_uses_cached_cells_and_highlights(self):
+        cells = [
+            ThumbnailCell(index=i, timestamp_ms=i * 1000, image_path=None, state="ready")
+            for i in range(12)
+        ]
+
+        class FakeManager:
+            def cached_cells(self, path):
+                self.cached_path = path
+                return cells
+
+        class FakeFileManager:
+            highlights = {"key": [1000, 2000]}
+
+            def _get_norm_key(self, path):
+                return "key"
+
+        class FakeRail:
+            def set_cells(self, value):
+                self.cells = value
+
+            def set_highlights(self, value):
+                self.highlights = value
+
+        window = type("FakeWindow", (), {})()
+        window.thumbnail_manager = FakeManager()
+        window.thumbnail_rail = FakeRail()
+        window.file_manager = FakeFileManager()
+
+        VideoSorter._sync_thumbnail_rail(window, "C:/videos/a.mp4", 120000)
+
+        self.assertEqual(window.thumbnail_manager.cached_path, "C:/videos/a.mp4")
+        self.assertEqual(window.thumbnail_rail.cells, cells)
+        self.assertEqual(window.thumbnail_rail.highlights, [1000, 2000])
+
+    def test_sync_thumbnail_rail_queues_loading_cells_when_cache_missing(self):
+        class FakeManager:
+            def cached_cells(self, path):
+                return []
+
+            def request_timeline(self, path, duration_ms=None, priority="active"):
+                self.request = (path, duration_ms, priority)
+
+            def start_next_job(self):
+                self.started = True
+
+        class FakeRail:
+            def set_cells(self, value):
+                self.cells = value
+
+            def set_highlights(self, value):
+                self.highlights = value
+
+        window = type("FakeWindow", (), {})()
+        window.thumbnail_manager = FakeManager()
+        window.thumbnail_rail = FakeRail()
+
+        VideoSorter._sync_thumbnail_rail(window, "C:/videos/a.mp4", 120000)
+
+        self.assertEqual(len(window.thumbnail_rail.cells), 12)
+        self.assertTrue(all(cell.state == "loading" for cell in window.thumbnail_rail.cells))
+        self.assertEqual(window.thumbnail_manager.request, ("C:/videos/a.mp4", 120000, "active"))
+        self.assertTrue(window.thumbnail_manager.started)
 
 
 class FakeStatusEngine:
