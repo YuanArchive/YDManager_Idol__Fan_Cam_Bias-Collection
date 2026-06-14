@@ -176,12 +176,20 @@ class VideoSorter(QMainWindow):
                 
     @property
     def player(self) -> QMediaPlayer:
-        """현재 활성화된 플레이어 객체를 반환합니다."""
+        """현재 시청 세션의 플레이어 객체를 반환합니다."""
+        if hasattr(self, "player_engine"):
+            active = self.player_engine.active_player()
+            if active is not None:
+                return active
         return self.player_manager.get_active_player()['player']
 
     @property
     def audio_output(self) -> QAudioOutput:
-        """현재 활성화된 오디오 출력 객체를 반환합니다."""
+        """현재 시청 세션의 오디오 출력 객체를 반환합니다."""
+        if hasattr(self, "player_engine"):
+            active = self.player_engine.active_audio()
+            if active is not None:
+                return active
         return self.player_manager.get_active_player()['audio']
 
     def _activate_engine_slot(self, slot) -> None:

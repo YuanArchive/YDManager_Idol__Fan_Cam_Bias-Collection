@@ -324,6 +324,61 @@ class PlayerEngineResetAndPrivacyTest(unittest.TestCase):
         self.assertFalse(VideoSorter.is_privacy_blocking_video(window))
 
 
+class PlayerPropertyRoutingTest(unittest.TestCase):
+    def test_player_property_prefers_engine_active_player(self):
+        engine_player = object()
+        manager_player = object()
+
+        class Engine:
+            def active_player(self):
+                return engine_player
+
+        class Manager:
+            def get_active_player(self):
+                return {"player": manager_player, "audio": object()}
+
+        window = type("FakeWindow", (), {})()
+        window.player_engine = Engine()
+        window.player_manager = Manager()
+
+        self.assertIs(VideoSorter.player.fget(window), engine_player)
+
+    def test_player_property_falls_back_to_manager_when_engine_has_no_active_player(self):
+        manager_player = object()
+
+        class Engine:
+            def active_player(self):
+                return None
+
+        class Manager:
+            def get_active_player(self):
+                return {"player": manager_player, "audio": object()}
+
+        window = type("FakeWindow", (), {})()
+        window.player_engine = Engine()
+        window.player_manager = Manager()
+
+        self.assertIs(VideoSorter.player.fget(window), manager_player)
+
+    def test_audio_output_property_prefers_engine_active_audio(self):
+        engine_audio = object()
+        manager_audio = object()
+
+        class Engine:
+            def active_audio(self):
+                return engine_audio
+
+        class Manager:
+            def get_active_player(self):
+                return {"player": object(), "audio": manager_audio}
+
+        window = type("FakeWindow", (), {})()
+        window.player_engine = Engine()
+        window.player_manager = Manager()
+
+        self.assertIs(VideoSorter.audio_output.fget(window), engine_audio)
+
+
 class FakeStatusEngine:
     def __init__(self, active_player, revealed=True, active_path=None):
         self.active = active_player
