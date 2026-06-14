@@ -81,22 +81,26 @@ class PlayerManager:
                     'path': None
                 })
 
-    def switch_mode(self, target_mode):
-        """[강화] 모드 전환 시 이전 모드의 모든 리소스를 명시적으로 해제"""
+    def switch_mode(self, target_mode, *, preserve_current=True):
+        """Switch visible player mode.
+
+        Passive switches keep existing media sources alive. Destructive release is
+        reserved for explicit cleanup paths such as reset, folder close, and delete.
+        """
         if target_mode not in self.pools:
             raise ValueError(f"Unknown player mode: {target_mode}")
 
         if self.current_mode == target_mode:
             return
             
-        # 기존 모드 플레이어들 완전 정지 및 소스 해제
-        old_pool = self.pools[self.current_mode]
-        for p_data in old_pool:
-            p_data['player'].stop()
-            p_data['player'].setSource(QUrl()) # 파일 핸들 즉시 해제
-            p_data['item'].setOpacity(0.0)
-            p_data['audio'].setMuted(True)
-            p_data['path'] = None
+        if not preserve_current:
+            old_pool = self.pools[self.current_mode]
+            for p_data in old_pool:
+                p_data['player'].stop()
+                p_data['player'].setSource(QUrl()) # 파일 핸들 즉시 해제
+                p_data['item'].setOpacity(0.0)
+                p_data['audio'].setMuted(True)
+                p_data['path'] = None
 
         self.current_mode = target_mode
         # 새 모드의 첫 번째 플레이어 준비 (인덱스 초기화 방지)

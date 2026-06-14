@@ -92,6 +92,31 @@ class PlayerManagerTest(unittest.TestCase):
         self.assertEqual(manager.current_mode, "main")
         self.assertFalse(manager.pools["main"][0]["player"].stopped)
 
+    def test_passive_switch_mode_preserves_current_pool_sources(self):
+        manager = make_manager()
+        active = manager.pools["main"][0]
+
+        manager.switch_mode("A", preserve_current=True)
+
+        self.assertEqual(manager.current_mode, "A")
+        self.assertFalse(active["player"].stopped)
+        self.assertEqual(active["player"].source, "loaded")
+        self.assertEqual(active["path"], "C:/videos/active.mp4")
+        self.assertFalse(active["audio"].muted)
+        self.assertEqual(active["item"].opacity, 1.0)
+
+    def test_destructive_switch_mode_releases_current_pool_when_requested(self):
+        manager = make_manager()
+        active = manager.pools["main"][0]
+
+        manager.switch_mode("A", preserve_current=False)
+
+        self.assertEqual(manager.current_mode, "A")
+        self.assertTrue(active["player"].stopped)
+        self.assertIsNone(active["path"])
+        self.assertEqual(active["item"].opacity, 0.0)
+        self.assertTrue(active["audio"].muted)
+
     def test_set_active_index_rejects_out_of_range_index(self):
         manager = make_manager()
 
