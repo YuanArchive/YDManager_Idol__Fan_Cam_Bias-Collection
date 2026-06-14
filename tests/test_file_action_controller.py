@@ -37,9 +37,11 @@ class FakeFileList:
         self.items = [FakeItem(path) for path in self.paths]
         self.taken_rows = []
         self.clear_count = 0
+        self.current_row = 0
+        self.block_history = []
 
     def currentRow(self):
-        return 0
+        return self.current_row
 
     def item(self, row):
         return self.items[row]
@@ -52,6 +54,12 @@ class FakeFileList:
 
     def count(self):
         return len(self.items)
+
+    def setCurrentRow(self, row):
+        self.current_row = row
+
+    def blockSignals(self, blocked):
+        self.block_history.append(blocked)
 
     def clear(self):
         self.clear_count += 1
@@ -223,6 +231,7 @@ class FileActionControllerTest(unittest.TestCase):
 
     def test_hard_delete_confirmation_releases_then_deletes_file(self):
         app = FakeApp("C:/videos/delete.mp4")
+        app.is_active_watch_path = lambda path: True
         controller = FileActionController(app)
 
         with patch(
@@ -237,6 +246,61 @@ class FileActionControllerTest(unittest.TestCase):
         self.assertEqual(app.file_list.taken_rows, [0])
         self.assertEqual(app.trash_button_updates, 1)
         self.assertEqual(app.auto_play_rows, [0])
+
+    def test_hard_delete_non_watch_path_releases_and_deletes_without_advancing_playback(self):
+        app = FakeApp("C:/videos/delete.mp4")
+        app.is_active_watch_path = lambda path: False
+        controller = FileActionController(app)
+
+        with patch(
+            "src.controllers.file_action_controller.ThemeMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            controller.hard_delete_file()
+
+        self.assertEqual(app.player_manager.released_paths, ["C:/videos/delete.mp4"])
+        self.assertEqual(app.file_manager.deleted_paths, ["C:/videos/delete.mp4"])
+        self.assertEqual(app.file_list.taken_rows, [0])
+        self.assertEqual(app.auto_play_rows, [])
+        self.assertEqual(app.file_list.block_history, [True, False])
+
+    def test_soft_delete_non_watch_path_moves_item_without_advancing_playback(self):
+        class SoftDeleteFileManager(FakeFileManager):
+            filter_type = None
+
+            def soft_delete_by_path(self, path):
+                self.soft_deleted_path = path
+                return {"path": path, "text": os.path.basename(path)}
+
+        app = FakeApp("C:/videos/delete.mp4")
+        app.file_manager = SoftDeleteFileManager()
+        app.is_active_watch_path = lambda path: False
+        controller = FileActionController(app)
+
+        controller.soft_delete_file()
+
+        self.assertEqual(app.file_manager.soft_deleted_path, "C:/videos/delete.mp4")
+        self.assertEqual(app.file_list.taken_rows, [0])
+        self.assertEqual(app.trash_button_updates, 1)
+        self.assertEqual(app.auto_play_rows, [])
+
+    def test_restore_non_watch_path_removes_item_without_advancing_playback(self):
+        class RestoreFileManager(FakeFileManager):
+            def restore(self, row):
+                self.restored_row = row
+                return {"path": "C:/videos/restore.mp4", "text": "restore.mp4"}
+
+        app = FakeApp("C:/videos/restore.mp4")
+        app.file_manager = RestoreFileManager()
+        app.is_active_watch_path = lambda path: False
+        controller = FileActionController(app)
+
+        controller.restore_file()
+
+        self.assertEqual(app.file_manager.restored_row, 0)
+        self.assertEqual(app.file_list.taken_rows, [0])
+        self.assertEqual(app.trash_button_updates, 1)
+        self.assertEqual(app.auto_play_rows, [])
 
     def test_hard_delete_uses_player_engine_path_release(self):
         app = FakeApp("C:/videos/delete.mp4")
@@ -420,6 +484,35 @@ class FileActionControllerTest(unittest.TestCase):
         controller.replay_current_highlight()
 
         self.assertEqual(app.seek_calls, [12345])
+
+    def test_delete_current_highlight_non_watch_path_does_not_advance_playback(self):
+        class HighlightFileManager(FakeFileManager):
+            def __init__(self):
+                super().__init__()
+                self.current_mode = "highlight"
+
+            def get_current_list(self):
+                return [{"path": "C:/videos/highlight.mp4", "start_pos": 12345}]
+
+            def delete_highlight(self, row):
+                self.deleted_row = row
+                return True, "deleted"
+
+            def get_highlight_display_list(self):
+                self.refreshed_highlights = True
+                return []
+
+        app = FakeApp("C:/videos/highlight.mp4")
+        app.file_manager = HighlightFileManager()
+        app.is_active_watch_path = lambda path: False
+        controller = FileActionController(app)
+
+        controller.delete_current_highlight_item()
+
+        self.assertEqual(app.file_manager.deleted_row, 0)
+        self.assertTrue(app.file_manager.refreshed_highlights)
+        self.assertEqual(app.update_mode_count, 1)
+        self.assertEqual(app.auto_play_rows, [])
 
 
 if __name__ == "__main__":

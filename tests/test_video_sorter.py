@@ -506,6 +506,19 @@ class PassiveListRefreshTest(unittest.TestCase):
         self.assertTrue(window.saved_main)
 
 
+class WatchPathMatchingTest(unittest.TestCase):
+    def test_is_active_watch_path_matches_normalized_session_path(self):
+        class Engine:
+            def active_session(self):
+                return type("Session", (), {"path": os.path.normpath("C:/videos/a.mp4")})()
+
+        window = type("FakeWindow", (), {})()
+        window.player_engine = Engine()
+
+        self.assertTrue(VideoSorter.is_active_watch_path(window, "C:/videos/./a.mp4"))
+        self.assertFalse(VideoSorter.is_active_watch_path(window, "C:/videos/b.mp4"))
+
+
 class FakeStatusEngine:
     def __init__(self, active_player, revealed=True, active_path=None):
         self.active = active_player

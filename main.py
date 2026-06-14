@@ -230,6 +230,15 @@ class VideoSorter(QMainWindow):
         session = VideoSorter._active_watch_session(self)
         return session is not None and bool(getattr(session, "path", None))
 
+    def is_active_watch_path(self, path: str | None) -> bool:
+        if not path:
+            return False
+        session = VideoSorter._active_watch_session(self)
+        session_path = getattr(session, "path", None)
+        if not session_path:
+            return False
+        return os.path.normcase(os.path.normpath(session_path)) == os.path.normcase(os.path.normpath(path))
+
     def _row_for_path(self, path: str | None) -> int:
         if not path:
             return -1

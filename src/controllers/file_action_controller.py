@@ -26,7 +26,24 @@ class FileActionController:
             app: VideoSorter 인스턴스 (메인 윈도우)
         """
         self.app = app
-    
+
+    def _is_active_watch_path(self, path):
+        if hasattr(self.app, "is_active_watch_path"):
+            return self.app.is_active_watch_path(path)
+        return True
+
+    def _select_next_candidate_without_playback(self, row):
+        file_list = self.app.file_list
+        if not hasattr(file_list, "blockSignals") or not hasattr(file_list, "setCurrentRow"):
+            return
+        file_list.blockSignals(True)
+        try:
+            next_row = min(row, file_list.count() - 1)
+            if next_row >= 0:
+                file_list.setCurrentRow(next_row)
+        finally:
+            file_list.blockSignals(False)
+
     # =========================================================================
     # 파일 삭제/복원
     # =========================================================================
@@ -39,6 +56,7 @@ class FileActionController:
         path = item_widget.data(Qt.ItemDataRole.UserRole)
         if not path: return
 
+        was_active_watch = self._is_active_watch_path(path)
         deleted_item = self.app.file_manager.soft_delete_by_path(path)
         
         if deleted_item:
@@ -47,7 +65,10 @@ class FileActionController:
             self.app.update_trash_button_text()
             self.app.lbl_info.setText(f"휴지통으로 이동됨: {deleted_item['text']}")
             
-            self.app.auto_play_next(row)
+            if was_active_watch:
+                self.app.auto_play_next(row)
+            else:
+                self._select_next_candidate_without_playback(row)
             if self.app.file_manager.filter_type:
                 self.app.lbl_info.setText(f"{self.app.file_manager.filter_type}급 태그: {self.app.file_list.count()}개 남음")
 
@@ -59,6 +80,7 @@ class FileActionController:
         item_widget = self.app.file_list.item(row)
         path = item_widget.data(Qt.ItemDataRole.UserRole)
         if not path: return
+        was_active_watch = self._is_active_watch_path(path)
 
         reply = ThemeMessageBox.question(
             self.app,
@@ -83,7 +105,10 @@ class FileActionController:
             self.app.file_list.takeItem(row)
             self.app.update_trash_button_text()
             self.app.lbl_info.setText("영구 삭제되었습니다.")
-            self.app.auto_play_next(row)
+            if was_active_watch:
+                self.app.auto_play_next(row)
+            else:
+                self._select_next_candidate_without_playback(row)
         else:
             logger.error(f"Hard Delete Failed: {path} - {msg}")
             ThemeMessageBox.critical(self.app, "오류", f"삭제 실패: {msg}")
@@ -91,6 +116,9 @@ class FileActionController:
     def restore_file(self):
         """휴지통 파일 복원"""
         row = self.app.file_list.currentRow()
+        item_widget = self.app.file_list.item(row) if row >= 0 else None
+        path = item_widget.data(Qt.ItemDataRole.UserRole) if item_widget else None
+        was_active_watch = self._is_active_watch_path(path)
         item = self.app.file_manager.restore(row)
         if item:
             logger.info(f"Restored: {item.get('path', 'Unknown')}")
@@ -99,7 +127,10 @@ class FileActionController:
             self.app.file_list.blockSignals(False)
             self.app.update_trash_button_text()
             self.app.lbl_info.setText(f"복구됨: {item['text']}")
-            self.app.auto_play_next(row)
+            if was_active_watch:
+                self.app.auto_play_next(row)
+            else:
+                self._select_next_candidate_without_playback(row)
 
     def restore_all_files(self):
         """휴지통 전체 복원"""
@@ -137,13 +168,15 @@ class FileActionController:
             elif hasattr(self.app, 'player_manager'):
                 for path in trash_paths:
                     self.app.player_manager.stop_and_release_path(path)
+            active_deleted = any(self._is_active_watch_path(path) for path in trash_paths)
 
             deleted_count = self.app.file_manager.clear_trash()
             self.app.file_list.clear()
             self.app.update_ui_mode()
             self.app.update_trash_button_text()
             self.app.lbl_info.setText(f"{deleted_count}개 파일 영구 삭제 완료")
-            self.app.reset_viewer_state()
+            if active_deleted:
+                self.app.reset_viewer_state()
 
     # =========================================================================
     # 태그 관리
@@ -305,12 +338,18 @@ class FileActionController:
         if self.app.file_manager.current_mode != 'highlight': return
         row = self.app.file_list.currentRow()
         if row < 0: return
+        current_list = self.app.file_manager.get_current_list()
+        target_path = current_list[row].get('path') if row < len(current_list) else None
+        was_active_watch = self._is_active_watch_path(target_path)
         success, msg = self.app.file_manager.delete_highlight(row)
         if success:
             self.app.file_manager.get_highlight_display_list()
             self.app.update_ui_mode()
             self.app.setWindowTitle("삭제 완료")
-            self.app.auto_play_next(row)
+            if was_active_watch:
+                self.app.auto_play_next(row)
+            else:
+                self._select_next_candidate_without_playback(row)
         else: 
             QMessageBox.warning(self.app, "오류", msg)
 
