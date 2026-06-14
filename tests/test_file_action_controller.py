@@ -36,8 +36,10 @@ class FakeFileList:
         self.paths = list(paths or ([path] if path else []))
         self.items = [FakeItem(path) for path in self.paths]
         self.taken_rows = []
+        self.take_blocked_history = []
         self.clear_count = 0
         self.current_row = 0
+        self.signals_blocked = False
         self.block_history = []
 
     def currentRow(self):
@@ -48,6 +50,7 @@ class FakeFileList:
 
     def takeItem(self, row):
         self.taken_rows.append(row)
+        self.take_blocked_history.append(self.signals_blocked)
         if 0 <= row < len(self.items):
             self.items.pop(row)
             self.paths.pop(row)
@@ -59,6 +62,7 @@ class FakeFileList:
         self.current_row = row
 
     def blockSignals(self, blocked):
+        self.signals_blocked = blocked
         self.block_history.append(blocked)
 
     def clear(self):
@@ -244,6 +248,7 @@ class FileActionControllerTest(unittest.TestCase):
         self.assertEqual(app.player_manager.released_paths, ["C:/videos/delete.mp4"])
         self.assertEqual(app.file_manager.deleted_paths, ["C:/videos/delete.mp4"])
         self.assertEqual(app.file_list.taken_rows, [0])
+        self.assertEqual(app.file_list.take_blocked_history, [True])
         self.assertEqual(app.trash_button_updates, 1)
         self.assertEqual(app.auto_play_rows, [0])
 
@@ -261,8 +266,9 @@ class FileActionControllerTest(unittest.TestCase):
         self.assertEqual(app.player_manager.released_paths, ["C:/videos/delete.mp4"])
         self.assertEqual(app.file_manager.deleted_paths, ["C:/videos/delete.mp4"])
         self.assertEqual(app.file_list.taken_rows, [0])
+        self.assertEqual(app.file_list.take_blocked_history, [True])
         self.assertEqual(app.auto_play_rows, [])
-        self.assertEqual(app.file_list.block_history, [True, False])
+        self.assertEqual(app.file_list.block_history, [True, False, True, False])
 
     def test_soft_delete_non_watch_path_moves_item_without_advancing_playback(self):
         class SoftDeleteFileManager(FakeFileManager):
@@ -281,6 +287,7 @@ class FileActionControllerTest(unittest.TestCase):
 
         self.assertEqual(app.file_manager.soft_deleted_path, "C:/videos/delete.mp4")
         self.assertEqual(app.file_list.taken_rows, [0])
+        self.assertEqual(app.file_list.take_blocked_history, [True])
         self.assertEqual(app.trash_button_updates, 1)
         self.assertEqual(app.auto_play_rows, [])
 

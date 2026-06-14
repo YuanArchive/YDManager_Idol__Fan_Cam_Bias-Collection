@@ -44,6 +44,16 @@ class FileActionController:
         finally:
             file_list.blockSignals(False)
 
+    def _take_item_without_signals(self, row):
+        file_list = self.app.file_list
+        if not hasattr(file_list, "blockSignals"):
+            return file_list.takeItem(row)
+        file_list.blockSignals(True)
+        try:
+            return file_list.takeItem(row)
+        finally:
+            file_list.blockSignals(False)
+
     # =========================================================================
     # 파일 삭제/복원
     # =========================================================================
@@ -61,7 +71,7 @@ class FileActionController:
         
         if deleted_item:
             logger.info(f"Soft Delete: {path}")
-            self.app.file_list.takeItem(row)
+            self._take_item_without_signals(row)
             self.app.update_trash_button_text()
             self.app.lbl_info.setText(f"휴지통으로 이동됨: {deleted_item['text']}")
             
@@ -102,7 +112,7 @@ class FileActionController:
         
         if success:
             logger.info(f"Hard Delete: {path}")
-            self.app.file_list.takeItem(row)
+            self._take_item_without_signals(row)
             self.app.update_trash_button_text()
             self.app.lbl_info.setText("영구 삭제되었습니다.")
             if was_active_watch:
@@ -122,9 +132,7 @@ class FileActionController:
         item = self.app.file_manager.restore(row)
         if item:
             logger.info(f"Restored: {item.get('path', 'Unknown')}")
-            self.app.file_list.blockSignals(True)
-            self.app.file_list.takeItem(row)
-            self.app.file_list.blockSignals(False)
+            self._take_item_without_signals(row)
             self.app.update_trash_button_text()
             self.app.lbl_info.setText(f"복구됨: {item['text']}")
             if was_active_watch:
