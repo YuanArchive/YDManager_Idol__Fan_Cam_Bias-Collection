@@ -69,10 +69,10 @@ Let the user understand a video before opening it.
 
 ### Minimal Feature
 
-For each indexed video, generate a small strip of scene thumbnails:
+For each indexed video, generate a compact preview timeline:
 
-- 6 thumbnails for short clips;
-- 8-12 thumbnails for longer videos;
+- exactly 12 thumbnails for every video, regardless of duration;
+- smarter sampling that avoids black, low-information, blurry, or near-duplicate frames where possible;
 - stored in an app cache, not beside the source video;
 - generated lazily in the background;
 - invalidated when file path, size, or modified time changes.
@@ -83,9 +83,13 @@ Keep it restrained:
 
 - show a compact vertical thumbnail rail on the far right of the player area;
 - keep thumbnails outside the video surface so the 16:9 player is not covered;
-- show about 12 small 16:9 frames for the active or selected video;
+- show 12 small 16:9 frames for the active or selected video;
+- keep the widget orientation-capable so a future horizontal rail can reuse the same model;
+- show a 200% hover preview without changing layout;
 - allow clicking a thumbnail to seek to that timestamp;
+- show subtle current-position and highlight markers;
 - show a passive generating state while thumbnails are being created;
+- use cached thumbnail quality data to improve random-start selection without delaying playback;
 - optionally show one preview thumbnail in the list only if performance stays good.
 
 ### Why It Matters
