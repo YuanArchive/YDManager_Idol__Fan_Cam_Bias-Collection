@@ -11,15 +11,11 @@ final_check_*/     # 백업 폴더 (중복 코드 방지)
 .antigravity/
 index/
 *.log
-BUILD.md
-YDManager.spec
 
 # --- Build Artifacts ---
 build/
 dist/
 installer/
-tests/
-setup.iss
 
 # --- Python 시스템 파일 (기본) ---
 __pycache__/
@@ -27,6 +23,7 @@ __pycache__/
 *$py.class
 .vscode/
 .idea/
+.venv/
 .env
 full_project_code.txt
 all_file.py

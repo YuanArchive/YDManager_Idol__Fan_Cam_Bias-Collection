@@ -4,6 +4,7 @@ import json
 import unicodedata
 import tempfile
 import logging
+import stat
 from functools import lru_cache
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -13,6 +14,17 @@ from src.core import consts
 from src.utils.utils import VIDEO_EXTENSIONS
 from src.core.threads import BackgroundIndexer
 
+REPARSE_POINT_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+
+def _is_reparse_point(entry):
+    try:
+        attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+        return bool(attributes & REPARSE_POINT_ATTRIBUTE)
+    except OSError:
+        return True
+
+
 class FileManager(QObject):
     # Signals
     indexing_started = pyqtSignal()
@@ -21,6 +33,7 @@ class FileManager(QObject):
     
     def __init__(self):
         super().__init__()
+        consts.migrate_legacy_index_files()
         self.root_folder = ""
         self.main_files = []   
         self.trash_files = []
@@ -32,6 +45,8 @@ class FileManager(QObject):
         
         # 인덱서 스레드
         self.indexer_thread = None
+        self._removed_folder_keys = set()
+        self._global_cache_dirty = False
 
         # 파일 경로 설정
         self.tags_file_path = consts.TAGS_FILE
@@ -65,7 +80,7 @@ class FileManager(QObject):
         if self.indexer_thread and self.indexer_thread.isRunning():
             return
 
-        history = self.get_folder_history()
+        history = list(self.get_folder_history())
         if not history:
             return
 
@@ -80,15 +95,72 @@ class FileManager(QObject):
         """인덱싱 스레드를 안전하게 종료합니다."""
         if self.indexer_thread and self.indexer_thread.isRunning():
             self.indexer_thread.is_running = False
+            self.indexer_thread.requestInterruption()
             self.indexer_thread.quit()
-            self.indexer_thread.wait(1000)
+            if not self.indexer_thread.wait(3000):
+                logging.warning("Background indexer did not stop within 3000 ms.")
+                return False
+            self.indexer_thread = None
+            self._persist_global_cache_if_dirty()
+        return True
             
     def _on_worker_data(self, chunk_list):
-        self.update_global_cache(chunk_list)
-        self.indexing_data_received.emit(chunk_list)
+        filtered_chunk = self._filter_index_chunk(chunk_list)
+        if not filtered_chunk:
+            return
+
+        self.update_global_cache(filtered_chunk, persist=False)
+        self.indexing_data_received.emit(filtered_chunk)
         
     def _on_worker_finished(self, count):
+        self._persist_global_cache_if_dirty()
         self.indexing_finished.emit(count)
+
+    def _folder_key_with_separator(self, path):
+        folder_key = self._get_norm_key(path)
+        if folder_key and not folder_key.endswith(os.sep):
+            folder_key += os.sep
+        return folder_key
+
+    def _is_within_folder_key(self, item_folder, folder_key):
+        item_folder_key = self._get_norm_key(item_folder)
+        if item_folder_key and not item_folder_key.endswith(os.sep):
+            item_folder_key += os.sep
+        return item_folder_key.startswith(folder_key)
+
+    def _filter_index_chunk(self, chunk_list):
+        if not self.folder_history:
+            return []
+
+        trash_keys = {
+            self._get_norm_key(item.get('path'))
+            for item in self.trash_files
+            if isinstance(item, dict) and item.get('path')
+        }
+        active_folder_keys = [
+            self._folder_key_with_separator(path)
+            for path in self.folder_history
+        ]
+        filtered = []
+
+        for item in chunk_list:
+            clean_item = self._normalize_file_item(item)
+            if not clean_item:
+                continue
+
+            item_key = self._get_norm_key(clean_item['path'])
+            if item_key in trash_keys:
+                continue
+
+            item_folder = clean_item.get('folder', os.path.dirname(clean_item['path']))
+            item_folder_key = self._folder_key_with_separator(item_folder)
+            if item_folder_key in self._removed_folder_keys:
+                continue
+
+            if any(self._is_within_folder_key(item_folder, active_key) for active_key in active_folder_keys):
+                filtered.append(clean_item)
+
+        return filtered
 
     # --- [Core] 경로 정규화 및 캐싱 (최적화 핵심) ---
     @lru_cache(maxsize=4096)  # 캐시 용량 증설
@@ -122,6 +194,26 @@ class FileManager(QObject):
         if not text: return ""
         return unicodedata.normalize('NFC', text)
 
+    def _sanitize_highlight_times(self, key):
+        raw_times = self.highlights.get(key, [])
+        if not isinstance(raw_times, list):
+            raw_times = []
+
+        valid_times = []
+        seen_times = set()
+        for timestamp in raw_times:
+            if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
+                continue
+            timestamp = int(timestamp)
+            if timestamp < 0 or timestamp in seen_times:
+                continue
+            seen_times.add(timestamp)
+            valid_times.append(timestamp)
+
+        valid_times.sort()
+        self.highlights[key] = valid_times
+        return valid_times
+
     # --- 데이터 입출력 ---
     def load_json(self, path):
         if os.path.exists(path):
@@ -135,6 +227,8 @@ class FileManager(QObject):
         """원자적 쓰기(Atomic Write)로 데이터 손상 방지"""
         dir_name = os.path.dirname(path)
         try:
+            if dir_name:
+                os.makedirs(dir_name, exist_ok=True)
             with tempfile.NamedTemporaryFile('w', dir=dir_name, delete=False, encoding='utf-8') as tf:
                 temp_name = tf.name
                 json.dump(data, tf, ensure_ascii=False, indent=4)
@@ -155,6 +249,9 @@ class FileManager(QObject):
         return {}
     
     def reset_all_data(self):
+        if self.stop_indexing() is False:
+            logging.warning("Reset aborted because the background indexer is still running.")
+            return False
         self.file_tags = {}
         self.highlights = {}
         self.folder_history = []
@@ -170,6 +267,7 @@ class FileManager(QObject):
             if os.path.exists(path):
                 try: os.remove(path)
                 except: pass
+        return True
 
     def _rebuild_tag_cache(self):
         """태그 딕셔너리 키 재정렬"""
@@ -178,30 +276,73 @@ class FileManager(QObject):
             new_tags[self._get_norm_key(path)] = tag
         self.file_tags = new_tags
 
+    def _normalize_file_item(self, item):
+        if not isinstance(item, dict):
+            return None
+
+        path = item.get('path')
+        if not path:
+            return None
+
+        clean_item = item.copy()
+        clean_item['path'] = self._normalize_path(path)
+        clean_item.setdefault('name', os.path.basename(clean_item['path']))
+        clean_item['folder'] = os.path.dirname(clean_item['path'])
+        return clean_item
+
+    def _trash_path_keys(self):
+        return {
+            self._get_norm_key(clean_item['path'])
+            for clean_item in (self._normalize_file_item(item) for item in self.trash_files)
+            if clean_item
+        }
+
     # --- 데이터 관리 ---
-    def update_global_cache(self, new_file_list):
-        unique_map = {self._get_norm_key(item['path']): item for item in self.global_files}
+    def update_global_cache(self, new_file_list, persist=True):
+        unique_map = {}
+        for item in self.global_files:
+            clean_item = self._normalize_file_item(item)
+            if clean_item:
+                unique_map[self._get_norm_key(clean_item['path'])] = clean_item
+
         for item in new_file_list:
-            key = self._get_norm_key(item['path'])
-            unique_map[key] = item
+            clean_item = self._normalize_file_item(item)
+            if clean_item:
+                key = self._get_norm_key(clean_item['path'])
+                unique_map[key] = clean_item
         
         self.global_files = list(unique_map.values())
         self.global_files.sort(key=lambda x: x['name'].lower())
-        self.save_json(self.global_cache_path, self.global_files)
+        if persist:
+            self.save_json(self.global_cache_path, self.global_files)
+        else:
+            self._global_cache_dirty = True
+
+    def _persist_global_cache_if_dirty(self):
+        if not self._global_cache_dirty:
+            return True
+
+        saved = self.save_json(self.global_cache_path, self.global_files)
+        if saved:
+            self._global_cache_dirty = False
+        return saved
 
     def save_trash(self):
         clean_list = []
         seen_keys = set()
 
         for item in self.trash_files:
-            path_key = self._get_norm_key(item['path'])
+            path = item.get('path') if isinstance(item, dict) else None
+            if not path:
+                continue
+            path_key = self._get_norm_key(path)
             if path_key in seen_keys: continue
             seen_keys.add(path_key)
 
             clean_item = item.copy()
             if 'text' in clean_item: del clean_item['text']
             if 'folder' not in clean_item: 
-                 clean_item['folder'] = os.path.dirname(clean_item['path'])
+                 clean_item['folder'] = os.path.dirname(path)
             clean_list.append(clean_item)
             
         self.save_json(self.trash_cache_path, clean_list)
@@ -216,12 +357,15 @@ class FileManager(QObject):
             valid_trash = []
             seen_paths = set()
             for item in data:
-                key = self._get_norm_key(item['path'])
+                path = item.get('path') if isinstance(item, dict) else None
+                if not path:
+                    continue
+                key = self._get_norm_key(path)
                 if key in seen_paths: continue 
                 seen_paths.add(key)
                 
                 if 'text' not in item:
-                    item['text'] = item.get('name', os.path.basename(item['path']))
+                    item['text'] = item.get('name', os.path.basename(path))
                 valid_trash.append(item)
             self.trash_files = valid_trash
         else:
@@ -233,6 +377,7 @@ class FileManager(QObject):
 
     def add_folder_to_history(self, path):
         path = self._normalize_path(path)
+        self._removed_folder_keys.discard(self._folder_key_with_separator(path))
         lower_history = [self._get_norm_key(p) for p in self.folder_history]
         if self._get_norm_key(path) not in lower_history:
             self.folder_history.insert(0, path)
@@ -242,24 +387,28 @@ class FileManager(QObject):
 
     def remove_folder_from_history(self, index):
         if 0 <= index < len(self.folder_history):
+            if self.stop_indexing() is False:
+                return None
             removed_path = self.folder_history.pop(index)
+            self._removed_folder_keys.add(self._folder_key_with_separator(removed_path))
             self.save_json(self.history_file_path, self.folder_history)
             
             # 히스토리 삭제 시 관련 글로벌 캐시도 정리
             if self.global_files:
-                norm_removed_key = self._get_norm_key(removed_path)
-                # 폴더 경로 끝에 구분자 추가하여 정확한 하위 경로 매칭 유도
-                if not norm_removed_key.endswith(os.sep):
-                    norm_removed_key += os.sep
+                norm_removed_key = self._folder_key_with_separator(removed_path)
                     
                 new_global = []
                 for item in self.global_files:
-                    item_folder = item.get('folder', os.path.dirname(item['path']))
+                    clean_item = self._normalize_file_item(item)
+                    if not clean_item:
+                        continue
+
+                    item_folder = clean_item.get('folder', os.path.dirname(clean_item['path']))
                     item_folder_key = self._get_norm_key(item_folder)
                     
                     # 해당 폴더에 속하지 않는 것만 남김
-                    if not (item_folder_key + os.sep).startswith(norm_removed_key):
-                        new_global.append(item)
+                    if not self._is_within_folder_key(item_folder, norm_removed_key):
+                        new_global.append(clean_item)
                 self.global_files = new_global
                 self.save_json(self.global_cache_path, self.global_files)
             return removed_path
@@ -274,9 +423,8 @@ class FileManager(QObject):
         target_key = self._get_canonical_path(path)
         
         # 중복 방지
-        for item in self.trash_files:
-            if self._get_canonical_path(item['path']) == target_key:
-                return None 
+        if target_key in self._trash_path_keys():
+            return None
 
         deleted_item = None
 
@@ -288,14 +436,21 @@ class FileManager(QObject):
         # Global Cache에서 삭제 및 데이터 확보
         if hasattr(self, 'global_files') and self.global_files:
             global_deleted = False
-            for i in range(len(self.global_files) - 1, -1, -1):
-                if self._get_canonical_path(self.global_files[i]['path']) == target_key:
+            clean_global_files = []
+            for item in self.global_files:
+                clean_item = self._normalize_file_item(item)
+                if not clean_item:
+                    continue
+
+                if self._get_canonical_path(clean_item['path']) == target_key:
                     if deleted_item is None:
-                        deleted_item = self.global_files[i].copy()
-                    self.global_files.pop(i)
+                        deleted_item = clean_item.copy()
                     global_deleted = True
+                else:
+                    clean_global_files.append(clean_item)
             
-            if global_deleted:
+            if global_deleted or len(clean_global_files) != len(self.global_files):
+                self.global_files = clean_global_files
                 self.save_json(self.global_cache_path, self.global_files)
 
         # 휴지통 이동
@@ -321,7 +476,11 @@ class FileManager(QObject):
     def restore(self, index):
         if self.current_mode != 'trash': return None
         if not (0 <= index < len(self.trash_files)): return None
-            
+        item = self.trash_files[index]
+        path = item.get('path') if isinstance(item, dict) else None
+        if not path or not os.path.exists(path):
+            return None
+
         item = self.trash_files.pop(index)
         
         if 'folder' not in item:
@@ -333,13 +492,21 @@ class FileManager(QObject):
         # Global Cache 복구
         item_key = self._get_norm_key(item['path'])
         is_in_global = False
+        clean_global_files = []
         if self.global_files:
             for g_item in self.global_files:
-                if self._get_norm_key(g_item['path']) == item_key:
-                    is_in_global = True; break
+                clean_item = self._normalize_file_item(g_item)
+                if not clean_item:
+                    continue
+
+                if self._get_norm_key(clean_item['path']) == item_key:
+                    is_in_global = True
+                clean_global_files.append(clean_item)
         
         if not is_in_global:
-            self.global_files.append(item)
+            clean_global_files.append(self._normalize_file_item(item) or item)
+        if clean_global_files != self.global_files:
+            self.global_files = clean_global_files
             self.global_files.sort(key=lambda x: x['path'])
             self.save_json(self.global_cache_path, self.global_files)
 
@@ -366,11 +533,14 @@ class FileManager(QObject):
     # --- [Action] 하이라이트/태그 ---
     def add_highlight(self, file_path, timestamp):
         key = self._get_norm_key(file_path)
-        if key not in self.highlights: self.highlights[key] = []
-        for t in self.highlights[key]:
+        if key not in self.highlights:
+            self.highlights[key] = []
+        times = self._sanitize_highlight_times(key)
+        for t in times:
             if abs(t - timestamp) < 1000: return False, "이미 저장된 구간입니다."
-        self.highlights[key].append(timestamp)
-        self.highlights[key].sort()
+        times.append(int(timestamp))
+        times.sort()
+        self.highlights[key] = times
         self.save_json(self.highlights_file_path, self.highlights)
         return True, "저장 완료"
 
@@ -390,8 +560,9 @@ class FileManager(QObject):
     def get_highlight_display_list(self):
         self.highlight_list = []
         seen_keys = set()
-        for path_key, times in self.highlights.items():
+        for path_key in list(self.highlights):
             if not os.path.exists(path_key): continue
+            times = self._sanitize_highlight_times(path_key)
             
             norm_key = self._get_norm_key(path_key)
             if norm_key in seen_keys: continue
@@ -413,24 +584,77 @@ class FileManager(QObject):
         """폴더 스캔 및 정렬 (중복 방지 추가)"""
         self.root_folder = self._normalize_path(folder_path)
         self.main_files = []
-        trash_keys = {self._get_norm_key(item['path']) for item in self.trash_files}
+        trash_keys = self._trash_path_keys()
         seen_keys = set() # [Fix] 중복 방지용 Set
         
         if os.path.exists(self.root_folder):
-            for root, dirs, files in os.walk(self.root_folder):
-                for f in files:
-                    if f.lower().endswith(VIDEO_EXTENSIONS):
-                        full = self._normalize_path(os.path.join(root, f))
-                        key = self._get_norm_key(full)
-                        
-                        if key not in trash_keys and key not in seen_keys:
-                            seen_keys.add(key)
-                            self.main_files.append({
-                                'path': full,
-                                'text': self._format_display_text(full)
-                            })
+            for full in self._iter_video_paths(self.root_folder):
+                key = self._get_norm_key(full)
+
+                if key not in trash_keys and key not in seen_keys:
+                    seen_keys.add(key)
+                    self.main_files.append({
+                        'path': full,
+                        'text': self._format_display_text(full)
+                    })
         
         self.main_files.sort(key=lambda x: os.path.basename(x['path']).lower())
+
+    def load_main_files_from_cache(self, folder_path):
+        """전역 캐시에서 현재 폴더 목록을 복원합니다. 캐시가 없으면 False를 반환합니다."""
+        self.root_folder = self._normalize_path(folder_path)
+        self.main_files = []
+
+        if not self.global_files:
+            return False
+
+        root_key = self._folder_key_with_separator(self.root_folder)
+        trash_keys = {
+            self._get_norm_key(item.get('path'))
+            for item in self.trash_files
+            if isinstance(item, dict) and item.get('path')
+        }
+        seen_keys = set()
+
+        for item in self.global_files:
+            clean_item = self._normalize_file_item(item)
+            if not clean_item:
+                continue
+
+            path = clean_item['path']
+            path_key = self._get_norm_key(path)
+            if path_key in trash_keys or path_key in seen_keys:
+                continue
+
+            item_folder = clean_item.get('folder', os.path.dirname(path))
+            if not self._is_within_folder_key(item_folder, root_key):
+                continue
+
+            if not os.path.exists(path):
+                continue
+
+            seen_keys.add(path_key)
+            self.main_files.append({
+                'path': path,
+                'text': self._format_display_text(path)
+            })
+
+        self.main_files.sort(key=lambda x: os.path.basename(x['path']).lower())
+        return bool(self.main_files)
+
+    def _iter_video_paths(self, folder_path):
+        try:
+            with os.scandir(folder_path) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_file(follow_symlinks=False) and entry.name.lower().endswith(VIDEO_EXTENSIONS):
+                            yield self._normalize_path(entry.path)
+                        elif entry.is_dir(follow_symlinks=False) and not _is_reparse_point(entry):
+                            yield from self._iter_video_paths(entry.path)
+                    except OSError:
+                        continue
+        except OSError:
+            return
 
     def toggle_file_tag(self, path, tag_char):
         key = self._get_norm_key(path)
@@ -462,7 +686,7 @@ class FileManager(QObject):
         self.search_keyword = self._normalize_text(text.strip().lower())
 
     def get_current_list(self):
-        trash_keys = {self._get_norm_key(item['path']) for item in self.trash_files}
+        trash_keys = self._trash_path_keys()
         target_list = []
         is_global_search = False
 
@@ -491,10 +715,15 @@ class FileManager(QObject):
             seen_search_keys = set() # [Fix] 검색 결과 중복 방지
             
             for item in target_list:
+                item = self._normalize_file_item(item)
+                if not item:
+                    continue
                 item_path = item['path']
                 key = self._get_norm_key(item_path)
                 
                 if key in trash_keys or key in seen_search_keys: continue
+                if is_global_search and not os.path.exists(item_path):
+                    continue
                 
                 search_text = item.get('text', item.get('name', os.path.basename(item_path)))
                 norm_text = self._normalize_text(search_text).lower()
@@ -511,8 +740,14 @@ class FileManager(QObject):
             result.sort(key=lambda x: os.path.basename(x['path']).lower())
             return result
         
-        target_list.sort(key=lambda x: os.path.basename(x['path']).lower())
-        return target_list
+        clean_target_list = []
+        for item in target_list:
+            clean_item = self._normalize_file_item(item)
+            if clean_item:
+                clean_target_list.append(clean_item)
+
+        clean_target_list.sort(key=lambda x: os.path.basename(x['path']).lower())
+        return clean_target_list
 
     def rename_file_by_path(self, old_path, new_name):
         if self.current_mode != 'main': return False, "변경 불가"
@@ -520,6 +755,8 @@ class FileManager(QObject):
         old_key = self._get_norm_key(old_path)
         target = None
         for item in self.main_files:
+            if not isinstance(item, dict) or not item.get('path'):
+                continue
             if self._get_norm_key(item['path']) == old_key:
                 target = item; break
         
@@ -541,7 +778,27 @@ class FileManager(QObject):
             if old_key in self.highlights:
                 self.highlights[new_key] = self.highlights.pop(old_key)
                 self.save_json(self.highlights_file_path, self.highlights)
-                
+
+            global_updated = False
+            clean_global_files = []
+            for item in self.global_files:
+                clean_item = self._normalize_file_item(item)
+                if not clean_item:
+                    global_updated = True
+                    continue
+
+                if self._get_norm_key(clean_item['path']) == old_key:
+                    clean_item['path'] = new_path
+                    clean_item['name'] = os.path.basename(new_path)
+                    clean_item['folder'] = dir_name
+                    clean_item['text'] = self._format_display_text(new_path)
+                    global_updated = True
+                clean_global_files.append(clean_item)
+            if global_updated:
+                self.global_files = clean_global_files
+                self.global_files.sort(key=lambda x: os.path.basename(x['path']).lower())
+                self.save_json(self.global_cache_path, self.global_files)
+
             target['text'] = self._format_display_text(new_path)
             return True, target['text']
         except Exception as e: return False, str(e)
@@ -559,7 +816,15 @@ class FileManager(QObject):
             hl_keys_to_del = [k for k in self.highlights if self._get_canonical_path(k) == key]
             for k in hl_keys_to_del: del self.highlights[k]
 
-            self.trash_files = [f for f in self.trash_files if os.path.normpath(f['path']) != os.path.normpath(path)]
+            self.trash_files = [
+                item
+                for item in self.trash_files
+                if (
+                    isinstance(item, dict)
+                    and item.get('path')
+                    and self._get_canonical_path(item['path']) != key
+                )
+            ]
             self._remove_from_search_data(path)
             
             self.save_trash()
@@ -578,12 +843,16 @@ class FileManager(QObject):
         deleted_paths = [] 
         
         for item in list(self.trash_files):
+            item_path = item.get('path') if isinstance(item, dict) else None
+            if not item_path:
+                continue
+
             try:
-                abs_path = os.path.abspath(item['path'])
+                abs_path = os.path.abspath(item_path)
                 if os.path.exists(abs_path):
                     send2trash(abs_path)
                 
-                key = self._get_canonical_path(item['path'])
+                key = self._get_canonical_path(item_path)
                 
                 tags_to_del = [k for k in self.file_tags if self._get_canonical_path(k) == key]
                 for k in tags_to_del: del self.file_tags[k]
@@ -591,21 +860,31 @@ class FileManager(QObject):
                 hls_to_del = [k for k in self.highlights if self._get_canonical_path(k) == key]
                 for k in hls_to_del: del self.highlights[k]
 
-                deleted_paths.append(item['path'])
+                deleted_paths.append(item_path)
                 count += 1
                 
             except Exception as e:
-                print(f"Failed to delete {item['path']}: {e}")
+                print(f"Failed to delete {item_path}: {e}")
                 continue
 
         if deleted_paths:
-            self.trash_files = [f for f in self.trash_files if f['path'] not in deleted_paths]
+            deleted_keys = {self._get_canonical_path(path) for path in deleted_paths}
+            self.trash_files = [
+                item
+                for item in self.trash_files
+                if (
+                    isinstance(item, dict)
+                    and item.get('path')
+                    and self._get_canonical_path(item['path']) not in deleted_keys
+                )
+            ]
 
             if hasattr(self, 'global_files'):
-                deleted_keys = {self._get_canonical_path(p) for p in deleted_paths}
                 self.global_files = [
-                    f for f in self.global_files 
-                    if self._get_canonical_path(f.get('path')) not in deleted_keys
+                    clean_item
+                    for item in self.global_files
+                    if (clean_item := self._normalize_file_item(item))
+                    and self._get_canonical_path(clean_item['path']) not in deleted_keys
                 ]
                 self.save_json(self.global_cache_path, self.global_files)
         
@@ -620,15 +899,19 @@ class FileManager(QObject):
         norm_target = self._get_canonical_path(target_path)
         
         self.main_files = [
-            f for f in self.main_files 
-            if self._get_canonical_path(f.get('path')) != norm_target
+            clean_item
+            for item in self.main_files
+            if (clean_item := self._normalize_file_item(item))
+            and self._get_canonical_path(clean_item['path']) != norm_target
         ]
         
         if hasattr(self, 'global_files'):
             original_count = len(self.global_files)
             self.global_files = [
-                f for f in self.global_files 
-                if self._get_canonical_path(f.get('path')) != norm_target
+                clean_item
+                for item in self.global_files
+                if (clean_item := self._normalize_file_item(item))
+                and self._get_canonical_path(clean_item['path']) != norm_target
             ]
             
             if len(self.global_files) != original_count:

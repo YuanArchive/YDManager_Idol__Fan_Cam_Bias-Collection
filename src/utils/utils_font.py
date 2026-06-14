@@ -5,6 +5,7 @@ import shutil
 import hashlib
 
 from PyQt6.QtGui import QFontDatabase, QFont
+from src.core import consts
 
 # =============================================================================
 # 폰트 설정 (여기에서 원하는 폰트의 주석을 풀어서 선택하세요)
@@ -18,9 +19,9 @@ SELECTED_FONT = "Pretendard"
 FONT_CONFIGS = {
     "Pretendard": {  # Local Source
         "type": "local",
-        "source_dir": os.path.join(os.getcwd(), "assets", "fonts"),
+        "source_dir": consts.FONT_DIR,
         "files": ["Pretendard-Medium.ttf", "Pretendard-Bold.ttf"],
-        "license_path": os.path.join(os.getcwd(), "assets", "fonts", "LICENSE_Pretendard.txt"), # [라이센스] 파일 경로 추가
+        "license_path": consts.FONT_LICENSE_PATH, # [라이센스] 파일 경로 추가
         "family": "Pretendard"
     }
 }
@@ -38,13 +39,7 @@ def resource_path(relative_path):
     PyInstaller 등으로 빌드된 실행 파일 내부의 리소스 경로를 반환합니다. 
     개발 환경에서는 현재 경로를 반환합니다.
     """
-    try:
-        # PyInstaller는 임시 폴더에 압축을 풀고 _MEIPASS에 경로를 저장합니다.
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
+    return consts.resource_path(relative_path)
 
 def verify_file_hash(file_path, expected_hash):
     """
@@ -95,7 +90,7 @@ def load_fonts():
 
     # 번들된 경로 체크
     for filename in load_files:
-        bundled_path = resource_path(os.path.join("fonts", filename))
+        bundled_path = resource_path(os.path.join("assets", "fonts", filename))
         if os.path.exists(bundled_path) and hasattr(sys, '_MEIPASS'):
             # EXE 실행 환경이고 파일이 내부에 존재함
             font_id = QFontDatabase.addApplicationFont(bundled_path)

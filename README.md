@@ -11,7 +11,7 @@
 <!-- 🏷️ BADGES -->
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/)
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://github.com/)
-[![Version](https://img.shields.io/badge/Version-1.0.0-88C0D0?style=for-the-badge)](https://github.com/)
+[![Version](https://img.shields.io/badge/Version-8.1-88C0D0?style=for-the-badge)](https://github.com/)
 [![License](https://img.shields.io/badge/License-MIT-A3BE8C?style=for-the-badge)](./LICENSE)
 
 <br/>
@@ -34,13 +34,13 @@
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 
-## � Installation
+## Installation
 
 <div align="center">
 
 ### 📥 지금 바로 다운로드
 
-[![Download](https://img.shields.io/badge/Download-YDManager_v1.0.0.exe-88C0D0?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/YuanArchive/YDManager_Idol__Fan_Cam_Bias-Collection/releases/latest)
+[![Download](https://img.shields.io/badge/Download-YDManager_Setup_v8.1.exe-88C0D0?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/YuanArchive/YDManager_Idol__Fan_Cam_Bias-Collection/releases/latest)
 
 **↑ 클릭 한 번으로 설치 끝!**
 
@@ -56,12 +56,19 @@
 ```bash
 # 1. 저장소 복제
 git clone https://github.com/YuanArchive/YDManager_Idol__Fan_Cam_Bias-Collection.git
-cd YDManager
+cd YDManager_Idol__Fan_Cam_Bias-Collection
 
-# 2. 의존성 설치
+# 2. 가상환경 생성 및 활성화
+python -m venv .venv
+.\.venv\Scripts\activate
+
+# 3. 의존성 설치
 pip install -r requirements.txt
 
-# 3. 실행
+# 4. 기본 점검
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\run_checks.ps1
+
+# 5. 실행
 python main.py
 ```
 
@@ -71,7 +78,7 @@ python main.py
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 
-## �📸 Preview
+## Preview
 
 <div align="center">
 
@@ -162,10 +169,20 @@ Windows **Blur/Acrylic** 효과로 오직 영상에만 집중할 수 있는 환�
 | 항목 | 요구 사항 |
 | :--- | :--- |
 | **OS** | Windows 10 / 11 (Acrylic Blur 지원) |
-| **Python** | 3.10+ (소스 실행 시) |
+| **Python** | Python 3.10.x (소스 실행 및 재현 가능한 릴리스 빌드 기준) |
 | **Display** | 1920×1080 이상 권장 |
 
 > ⚠️ **Note**: macOS/Linux는 미지원 (Win32 API, BlurWindow 의존)
+> 🎞️ **Codec**: 재생은 Windows/Qt Multimedia 코덱 지원에 따릅니다. 일부 HEVC/H.265 영상은 Windows HEVC 확장 설치 또는 H.264/AAC 변환이 필요할 수 있습니다.
+
+### 데이터 및 로그 위치
+
+| 항목 | 위치 |
+| :--- | :--- |
+| **앱 데이터** | `%LOCALAPPDATA%\YDManager\index` |
+| **기존 데이터 마이그레이션** | 저장소의 `index/*.json` 파일은 새 위치에 파일이 없을 때만 복사됩니다. |
+| **로그** | `%LOCALAPPDATA%\YDManager\logs\app.log` |
+| **폰트 캐시** | `%LOCALAPPDATA%\YDManager\fonts` |
 
 <br/>
 
@@ -233,8 +250,9 @@ Windows **Blur/Acrylic** 효과로 오직 영상에만 집중할 수 있는 환�
 | 단축키 | 동작 |
 | :---: | :--- |
 | <kbd>3</kbd> | 현재 장면 하이라이트 저장 |
-| <kbd>Enter</kbd> | 선택한 하이라이트 재생 |
+| <kbd>Enter</kbd> (하이라이트 모드) | 선택한 하이라이트 재생 |
 | <kbd>3</kbd> (하이라이트 모드) | 항목 삭제 |
+| <kbd>Delete</kbd> (하이라이트 모드) | 하이라이트 항목 삭제 |
 
 </details>
 
@@ -245,7 +263,9 @@ Windows **Blur/Acrylic** 효과로 오직 영상에만 집중할 수 있는 환�
 
 | 단축키 | 동작 |
 | :---: | :--- |
-| <kbd>R</kbd> / <kbd>Enter</kbd> | 파일 복구 |
+| <kbd>R</kbd> (휴지통 모드) | 파일 복구 |
+| <kbd>Enter</kbd> (휴지통 모드) | 파일 복구 |
+| <kbd>Delete</kbd> (휴지통 모드) | 영구 삭제 |
 
 </details>
 
@@ -265,7 +285,7 @@ YDManager/
 │   ├── 📁 ui/              # UI 컴포넌트 & 스타일
 │   └── 📁 utils/           # 유틸리티 함수
 ├── 📁 assets/              # 아이콘 & 리소스
-├── 📁 fonts/               # 커스텀 폰트
+│   └── 📁 fonts/           # 커스텀 폰트
 └── 📁 docs/                # 문서 & 스크린샷
 ```
 

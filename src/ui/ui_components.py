@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsTextItem, Q
                              QListWidget, QAbstractItemView, QMessageBox, QDialog, QVBoxLayout, QHBoxLayout, 
                              QLabel, QPushButton)
 from PyQt6.QtGui import QColor, QFont, QBrush, QPen, QPainter, QPaintEvent, QDrag, QPixmap, QPainterPath, QRegion, QIcon
-from PyQt6.QtCore import pyqtSignal, Qt, QSizeF, QRectF, QTimer, QPoint, QRectF, QPropertyAnimation, QEasingCurve, QPropertyAnimation, QEasingCurve, QSize
+from PyQt6.QtCore import pyqtSignal, Qt, QSizeF, QRectF, QTimer, QPoint, QPropertyAnimation, QEasingCurve, QSize
 from .styles import CurrentTheme as Theme
 from BlurWindow.blurWindow import GlobalBlur
 from src.utils.utils_font import get_current_font_family # [추가]
@@ -98,15 +98,6 @@ class ProVideoView(QGraphicsView):
         region = QRegion(path.toFillPolygon().toPolygon())
         self.viewport().setMask(region)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        # 영상 아이템 크기를 뷰포트 크기에 정확히 맞춥니다.
-        for item in self.scene.items():
-            from PyQt6.QtMultimediaWidgets import QGraphicsVideoItem
-            if isinstance(item, QGraphicsVideoItem):
-                item.setSize(QSizeF(self.size()))
-        self.update_layout_items()
-    
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -309,6 +300,10 @@ class ProVideoView(QGraphicsView):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        from PyQt6.QtMultimediaWidgets import QGraphicsVideoItem
+        for item in self.scene.items():
+            if isinstance(item, QGraphicsVideoItem):
+                item.setSize(QSizeF(self.size()))
         self.update_layout_items()
 
     def _handle_seek(self, event):

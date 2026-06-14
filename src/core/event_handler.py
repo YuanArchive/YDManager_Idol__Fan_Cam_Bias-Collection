@@ -108,6 +108,7 @@ class ShortcutHandler:
             if key == Qt.Key.Key_Delete:
                 if self.main.file_manager.is_trash_mode: self.main.hard_delete_file()
                 elif self.main.folder_list_widget.hasFocus(): self.main.delete_folder_history_item()
+                elif self.main.file_manager.current_mode == 'highlight': self.main.delete_current_highlight_item()
                 else: self.main.soft_delete_file()
                 return True
 

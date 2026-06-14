@@ -30,6 +30,7 @@ from src.ui.styles import Catppuccin, DARK_THEME
 from src.ui.settings_ui import SettingsDialog
 from src.managers.file_manager import FileManager
 from src.managers.settings_manager import SettingsManager
+from src.core import consts
 from src.utils.utils_font import load_fonts
 from src.ui.ui_layout import init_ui
 from src.managers.player_manager import PlayerManager
@@ -97,6 +98,10 @@ class VideoSorter(QMainWindow):
         self.scan_timer.setInterval(500) 
         # [주의] execute_auto_scan은 Part 3에서 정의되므로 지금은 연결만 해둠
         self.scan_timer.timeout.connect(lambda: self.execute_auto_scan())
+
+        self.index_refresh_timer = QTimer()
+        self.index_refresh_timer.setSingleShot(True)
+        self.index_refresh_timer.timeout.connect(self.load_files)
 
         # 프리로드 타이머 (버퍼링 최소화)
         self.preload_timer = QTimer()
@@ -170,13 +175,12 @@ class VideoSorter(QMainWindow):
 
     def set_window_icon(self) -> None:
         """애플리케이션 아이콘 및 Windows AppID 설정"""
-        icon_path = os.path.join(os.getcwd(), "assets", "icon.ico")
+        icon_path = consts.ICON_PATH
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         
         if sys.platform == 'win32':
-            myappid = 'mycompany.ydmanager.subproduct.02' 
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(consts.APP_ID)
 
     def load_config(self) -> None:
         """SettingsManager에서 사용자 환경설정을 로드합니다."""
@@ -314,19 +318,26 @@ class VideoSorter(QMainWindow):
             # (단, 사용자가 스크롤 중이거나 하면 방해가 될 수 있어 신중해야 함.
             #  여기서는 단순하게 현재 폴더에 속한 파일이 청크에 있으면 리스트 재로딩)
             elif self.root_folder:
-                current_norm = os.path.normpath(self.root_folder)
+                current_norm = os.path.normcase(os.path.abspath(os.path.normpath(self.root_folder)))
                 needs_reload = False
                 for item in chunk_list:
-                    # item['folder'] 가 현재 폴더와 같다면
-                    if os.path.normpath(item.get('folder', '')) == current_norm:
+                    # item['folder'] 가 현재 폴더 또는 그 하위 폴더라면
+                    item_folder = item.get('folder') or os.path.dirname(item.get('path', ''))
+                    if not item_folder:
+                        continue
+
+                    item_norm = os.path.normcase(os.path.abspath(os.path.normpath(item_folder)))
+                    try:
+                        is_current_tree = os.path.commonpath([current_norm, item_norm]) == current_norm
+                    except ValueError:
+                        is_current_tree = False
+
+                    if is_current_tree:
                         needs_reload = True
                         break
                 
                 if needs_reload:
-                    # 전체 리로딩은 무거울 수 있으므로, 
-                    # 현재 리스트에 없는 것만 추가하는 것이 좋으나
-                    # 로직 단순화를 위해 load_files 호출 (이미 scan_folder에서 중복체크 함)
-                    self.load_files()
+                    self.index_refresh_timer.start(250)
 
         finally:
             self.file_list.setUpdatesEnabled(True)  
@@ -358,7 +369,7 @@ class VideoSorter(QMainWindow):
                 new_order.append(path)
         self.file_manager.update_history_order(new_order)
 
-    def load_files(self) -> None:
+    def load_files(self, force_scan: bool = False) -> None:
         """새로고침 시 호출되는 로직"""
         # 레거시 코덱 스레드 정리 (만약 있다면)
         if self.codec_thread and self.codec_thread.isRunning(): 
@@ -374,12 +385,26 @@ class VideoSorter(QMainWindow):
         
         # 2. 실제 폴더 스캔 (여기서 정렬이 수행됨)
         if self.root_folder and os.path.isdir(self.root_folder):
-            self.file_manager.scan_folder(self.root_folder)
+            if force_scan:
+                self.file_manager.scan_folder(self.root_folder)
+            else:
+                VideoSorter._load_current_root_files(self)
         else:
             self.file_manager.main_files = []
 
         # 3. UI 업데이트 (정렬된 리스트 반영)
         self.update_ui_mode()
+
+    def _load_current_root_files(self) -> bool:
+        """현재 루트 폴더 목록을 캐시 우선으로 로드하고, 캐시가 없으면 직접 스캔합니다."""
+        if not self.root_folder:
+            return False
+
+        if self.file_manager.load_main_files_from_cache(self.root_folder):
+            return True
+
+        self.file_manager.scan_folder(self.root_folder)
+        return True
 
     # =========================================================================
     # 4. UI Mode & Filter Logic (뷰 모드 및 필터 로직)
@@ -791,6 +816,7 @@ class VideoSorter(QMainWindow):
             active_data['player'].setSource(QUrl.fromLocalFile(target_path))
             
             # [Fix 1] 신호가 안 올 경우를 대비해 안전장치 타이머 가동 (최대 1.5초 뒤 강제 표시)
+            self.is_waiting_for_seek = True
             self.seek_safety_timer.start()
         else:
             # 프리로드 적중: 이미 로드된 상태면 바로 표시
@@ -820,8 +846,10 @@ class VideoSorter(QMainWindow):
                 if active_data['player'].mediaStatus() == QMediaPlayer.MediaStatus.LoadedMedia:
                      active_data['item'].setOpacity(1.0)
 
-        if self.chk_autoscan.isChecked():
+        if self.conf_auto_play and self.chk_autoscan.isChecked():
             self.scan_timer.start()
+        else:
+            self.scan_timer.stop()
         self.preload_timer.start(50)
 
     def _handle_immediate_seek(self, active_data):
@@ -841,8 +869,10 @@ class VideoSorter(QMainWindow):
         if self.conf_auto_play and self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
             self.player.play()
             
-        if self.chk_autoscan.isChecked(): 
+        if self.conf_auto_play and self.chk_autoscan.isChecked():
             self.scan_timer.start()
+        else:
+            self.scan_timer.stop()
             
     def preload_next_file(self, current_index: int) -> None:
         """다음/이전 영상을 백그라운드 플레이어에 미리 로드"""
@@ -990,9 +1020,11 @@ class VideoSorter(QMainWindow):
         """검색어 입력 시 호출 (검색어가 비어지면 즉시 복원)"""
         # 검색어가 비어지면 즉시 전체 목록으로 복원
         if not text.strip():
+            self.search_debounce_timer.stop()
+            self._pending_search_text = ''
             self.file_manager.set_search_keyword('')
             if self.root_folder:
-                self.file_manager.scan_folder(self.root_folder)
+                VideoSorter._load_current_root_files(self)
             
             # [버그 수정] 현재 재생 중인 파일의 경로 저장
             current_playing_path = self.player.source().toLocalFile()
@@ -1011,39 +1043,41 @@ class VideoSorter(QMainWindow):
                 self.file_list.blockSignals(False)
             
             self.lbl_info.setText("검색어 지움 (전체 목록)")
+            return
+
+        self._pending_search_text = text.strip()
+        self.search_debounce_timer.start()
     
     def on_search_submitted(self):
         """[신규] Enter 키로 검색 실행"""
         text = self.input_search.text().strip()
         
         logger.debug(f"Search Submitted: '{text}'")
-        
-        self.file_manager.set_search_keyword(text)
-        
-        if not text and self.root_folder:
-            self.file_manager.scan_folder(self.root_folder)
-        
-        self.update_ui_mode()
+        self.search_debounce_timer.stop()
+        self._pending_search_text = text
+
+        VideoSorter._execute_search(self)
         count = self.file_list.count()
         
         logger.debug(f"Search Result: {count} items found")
-        
-        if text:
-            self.lbl_info.setText(f"검색 결과: {count}개")
-        else:
-            self.lbl_info.setText("검색어 지움 (전체 목록)")
     
     def _execute_search(self):
         """실제 검색 실행 (디바운스 후 호출됨) - 레거시 호환용"""
-        text = getattr(self, '_pending_search_text', '')
+        text = getattr(self, '_pending_search_text', '').strip()
         
         if text and len(text) < 2:
+            self._pending_search_text = ''
+            self.file_manager.set_search_keyword('')
+            if self.root_folder:
+                VideoSorter._load_current_root_files(self)
+            self.update_ui_mode()
+            self.lbl_info.setText("검색어는 2글자 이상 입력하세요")
             return
         
         self.file_manager.set_search_keyword(text)
         
         if not text and self.root_folder:
-            self.file_manager.scan_folder(self.root_folder)
+            VideoSorter._load_current_root_files(self)
         
         self.update_ui_mode()
         count = self.file_list.count()
@@ -1069,7 +1103,7 @@ class VideoSorter(QMainWindow):
             self.target_start_pos = 0
             
             self.root_folder = full_path
-            self.load_files()
+            self.load_files(force_scan=True)
             self.lbl_info.setText(f"로드됨: {os.path.basename(full_path)}")
             self.folder_list_widget.setFocus()
             pass
@@ -1111,6 +1145,7 @@ class VideoSorter(QMainWindow):
             if active_data:
                 active_data['player'].stop()
                 active_data['player'].setSource(QUrl())
+                active_data['path'] = None
                 active_data['item'].setOpacity(0.0)
 
         if hasattr(self, 'lbl_info'):
@@ -1199,6 +1234,7 @@ class VideoSorter(QMainWindow):
                 # 현재 보고 있는 폴더가 삭제되었으면 초기화
                 current_viewing = os.path.normpath(self.root_folder) if self.root_folder else ""
                 if current_viewing == os.path.normpath(removed_path) or not self.file_manager.get_folder_history():
+                    self.root_folder = ""
                     self.file_list.clear() 
                     self.reset_viewer_state()
                     
@@ -1216,12 +1252,12 @@ class VideoSorter(QMainWindow):
         new_rate = max(1.0, min(10.0, self.playback_rate + delta))
         self.playback_rate = round(new_rate, 1)
         self.player.setPlaybackRate(self.playback_rate)
-        self.video_view.show_temp_message(f"<div style='font-size:30px;color:white;background:rgba(0,0,0,0.6);padding:10px;'>⚡ x {int(self.playback_rate)}</div>")
+        self.video_view.show_temp_message(f"재생 속도 x {self.playback_rate:.1f}")
 
     def reset_playback_rate(self):
         self.playback_rate = 1.0
         self.player.setPlaybackRate(1.0)
-        self.video_view.show_temp_message(f"<div style='font-size:30px;color:white;background:rgba(0,0,0,0.6);padding:10px;'>▶ x 1.0</div>")
+        self.video_view.show_temp_message("재생 속도 x 1.0")
 
     def move_selection(self, delta):
         count = self.file_list.count()
@@ -1316,6 +1352,20 @@ class VideoSorter(QMainWindow):
 
     def eventFilter(self, source, event):
         """로직을 직접 처리하지 않고 ShortcutHandler에 위임합니다."""
+
+        privacy_active = False
+        if getattr(self, 'conf_privacy_mode', False):
+            try:
+                privacy_active = self.player.playbackState() == QMediaPlayer.PlaybackState.PausedState
+            except (RuntimeError, AttributeError):
+                privacy_active = False
+
+        if privacy_active:
+            if event.type() == QEvent.Type.KeyRelease and event.key() == Qt.Key.Key_Shift:
+                self._is_shift_pressed = False
+                self._is_shift_combined = False
+            if self.shortcut_handler.process_event(source, event):
+                return True
         
         # [Shift 단독 실행 로직] - 검색창 바로가기
         if event.type() == QEvent.Type.KeyPress:
@@ -1370,8 +1420,6 @@ if __name__ == "__main__":
     dpi = screen.logicalDotsPerInch()
     pixel_ratio = screen.devicePixelRatio()
     
-    logger.info(f"Display Detected - DPI: {dpi}, Pixel Ratio: {pixel_ratio}")
-
     logger.info(f"Display Detected - DPI: {dpi}, Pixel Ratio: {pixel_ratio}")
 
     font = app.font()

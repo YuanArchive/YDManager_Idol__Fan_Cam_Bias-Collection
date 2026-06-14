@@ -1,15 +1,15 @@
 
 import sys
 import os
+from pathlib import Path
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QImage, QPainter, QColor, QLinearGradient, QFont, QPen
 from PyQt6.QtCore import QPointF, Qt, QRectF
 
 def ensure_assets_dir():
-    assets_dir = os.path.join(os.getcwd(), "assets")
-    if not os.path.exists(assets_dir):
-        os.makedirs(assets_dir)
-    return assets_dir
+    assets_dir = Path(__file__).resolve().parents[1] / "assets"
+    assets_dir.mkdir(exist_ok=True)
+    return str(assets_dir)
 
 def create_sidebar_image(path):
     # 164x314 (Inno Setup WizardImageFile default/typical size, but can be larger)

@@ -14,7 +14,7 @@ def setup_app_connections(window):
     window.btn_settings.clicked.connect(window.open_settings)
     window.btn_trash_mode.clicked.connect(window.toggle_trash_mode)
     window.btn_main_list.clicked.connect(window.go_to_main_mode)
-    window.btn_refresh.clicked.connect(window.load_files)
+    window.btn_refresh.clicked.connect(lambda: window.load_files(force_scan=True))
     
     # [3] Filter & Tag Buttons
     window.btn_filter_a.clicked.connect(lambda: window.apply_filter('A'))

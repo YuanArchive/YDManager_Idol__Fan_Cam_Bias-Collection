@@ -83,6 +83,9 @@ class PlayerManager:
 
     def switch_mode(self, target_mode):
         """[강화] 모드 전환 시 이전 모드의 모든 리소스를 명시적으로 해제"""
+        if target_mode not in self.pools:
+            raise ValueError(f"Unknown player mode: {target_mode}")
+
         if self.current_mode == target_mode:
             return
             
@@ -124,9 +127,15 @@ class PlayerManager:
         return [i for i in range(pool_len) if i != idx]
 
     def get_player_by_index(self, index):
+        pool = self.pools[self.current_mode]
+        if not 0 <= index < len(pool):
+            raise IndexError(f"Player index out of range: {index}")
         return self.pools[self.current_mode][index]
 
     def set_active_index(self, index):
+        pool = self.pools[self.current_mode]
+        if not 0 <= index < len(pool):
+            raise IndexError(f"Player index out of range: {index}")
         self.active_indices[self.current_mode] = index
 
     def resize_all(self, new_size):
@@ -162,6 +171,9 @@ class PlayerManager:
                 if p_path and os.path.normpath(p_path) == target_norm:
                     p_data['player'].stop()
                     p_data['player'].setSource(QUrl())
+                    p_data['item'].setOpacity(0.0)
+                    p_data['item'].setZValue(0.0)
+                    p_data['audio'].setMuted(True)
                     p_data['path'] = None
                     found = True
         return found

@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QSpinBox, QCheckBox, QComboBox, QAbstractSpinBox,
                              QPushButton, QLabel, QMessageBox, QSizePolicy)
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve
+from src.core import consts
 from src.managers.settings_manager import SettingsManager
 from BlurWindow.blurWindow import GlobalBlur
 from . import styles
@@ -221,7 +222,13 @@ class SettingsDialog(QDialog):
         
         if reply == QMessageBox.StandardButton.Yes:
             if self.file_manager:
-                self.file_manager.reset_all_data()
+                if self.file_manager.reset_all_data() is False:
+                    ThemeMessageBox.warning(
+                        self,
+                        "초기화 중단",
+                        "인덱싱 작업이 아직 종료되지 않아 기록 초기화를 중단했습니다.\n잠시 후 다시 시도해 주세요."
+                    )
+                    return
                 if self.parent() and hasattr(self.parent(), 'reset_all_ui'):
                     self.parent().reset_all_ui()
                 ThemeMessageBox.information(self, "완료", "모든 기록이 초기화되었습니다.")
@@ -236,7 +243,7 @@ class SettingsDialog(QDialog):
         license_text = f"사용 중인 폰트: {font_name}\n\n"
         
         # 라이센스 파일 읽기 시도
-        license_path = os.path.join(os.getcwd(), "assets", "fonts", "LICENSE_Pretendard.txt")
+        license_path = consts.FONT_LICENSE_PATH
         if os.path.exists(license_path):
             try:
                 with open(license_path, 'r', encoding='utf-8') as f:

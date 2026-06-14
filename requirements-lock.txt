@@ -1,0 +1,14 @@
+# Release lock generated from a clean Windows venv on 2026-06-12.
+altgraph==0.17.5
+BlurWindow==1.2.1
+packaging==26.2
+pefile==2024.8.26
+PyQt6==6.11.0
+PyQt6-Qt6==6.11.1
+PyQt6-sip==13.11.1
+pyinstaller==6.20.0
+pyinstaller-hooks-contrib==2026.6
+pywin32-ctypes==0.2.3
+qtawesome==1.4.2
+QtPy==2.4.3
+send2trash==2.1.0

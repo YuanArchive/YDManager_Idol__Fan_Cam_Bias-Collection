@@ -59,6 +59,15 @@ class FileActionController:
         item_widget = self.app.file_list.item(row)
         path = item_widget.data(Qt.ItemDataRole.UserRole)
         if not path: return
+
+        reply = ThemeMessageBox.question(
+            self.app,
+            "영구 삭제",
+            f"선택한 파일을 영구 삭제하시겠습니까?\n\n{os.path.basename(path)}\n\n⚠️ 이 작업은 되돌릴 수 없습니다.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
         
         # 1. 플레이어 잠금 해제
         if hasattr(self.app, 'player_manager'):
@@ -115,7 +124,18 @@ class FileActionController:
         )
 
         if reply == QMessageBox.StandardButton.Yes:
+            trash_paths = [
+                item.get('path')
+                for item in trash_list
+                if isinstance(item, dict) and item.get('path')
+            ]
+            if hasattr(self.app, 'player_manager'):
+                for path in trash_paths:
+                    self.app.player_manager.stop_and_release_path(path)
+
             deleted_count = self.app.file_manager.clear_trash()
+            self.app.file_list.clear()
+            self.app.update_ui_mode()
             self.app.update_trash_button_text()
             self.app.lbl_info.setText(f"{deleted_count}개 파일 영구 삭제 완료")
             self.app.reset_viewer_state()
@@ -199,6 +219,7 @@ class FileActionController:
         
         # 파일명에서 # 추가 또는 제거 결정
         new_basename = old_basename[1:] if old_basename.startswith("#") else "#" + old_basename 
+        new_path = os.path.normpath(os.path.join(os.path.dirname(current_item['path']), new_basename))
         current_pos = self.app.player.position()
         
         # 현재 활성 플레이어의 인덱스 저장 (같은 플레이어 재사용)
@@ -220,7 +241,6 @@ class FileActionController:
             success, msg = self.app.file_manager.rename_file_by_path(current_item['path'], new_basename)
             if success: 
                 item_widget.setText(msg) 
-                new_path = current_list[real_index]['path']
                 item_widget.setData(Qt.ItemDataRole.UserRole, new_path)
                 
                 # 같은 플레이어에 직접 새 소스 설정
@@ -288,7 +308,10 @@ class FileActionController:
         if self.app.file_manager.current_mode != 'highlight': return
         row = self.app.file_list.currentRow()
         if 0 <= row < self.app.file_list.count():
-            item_data = self.app.file_manager.get_current_list()[row]
+            current_list = self.app.file_manager.get_current_list()
+            if row >= len(current_list):
+                return
+            item_data = current_list[row]
             start_pos = item_data.get('start_pos', 0)
             self.app._execute_seek_and_play(start_pos)
 

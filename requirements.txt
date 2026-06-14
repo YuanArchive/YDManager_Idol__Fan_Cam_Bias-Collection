@@ -1,5 +1,4 @@
-PyQt6>=6.4.0
-qtawesome>=1.2.0
-BlurWindow>=1.2.1
-send2trash>=1.8.0
-pyinstaller>=6.0.0
+PyQt6==6.11.0
+qtawesome==1.4.2
+BlurWindow==1.2.1
+send2trash==2.1.0
