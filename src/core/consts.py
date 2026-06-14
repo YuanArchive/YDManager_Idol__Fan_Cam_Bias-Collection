@@ -30,6 +30,8 @@ HIGHLIGHTS_FILE = os.path.join(INDEX_DIR, "video_highlights.json")
 HISTORY_FILE = os.path.join(INDEX_DIR, "folder_history.json")
 TRASH_CACHE_FILE = os.path.join(INDEX_DIR, "trash_cache.json")
 GLOBAL_CACHE_FILE = os.path.join(INDEX_DIR, "video_global_cache.json")
+THUMBNAIL_CACHE_DIR = os.path.join(USER_DATA_ROOT, "thumbnail_cache")
+THUMBNAIL_MANIFEST_FILE = os.path.join(INDEX_DIR, "thumbnail_manifest.json")
 
 INDEX_FILE_NAMES = (
     "video_tags.json",
