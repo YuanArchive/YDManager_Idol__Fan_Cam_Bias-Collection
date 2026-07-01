@@ -504,6 +504,179 @@ class PlayerEngineResetAndPrivacyTest(unittest.TestCase):
 
         self.assertFalse(VideoSorter.is_privacy_blocking_video(window))
 
+    def test_privacy_blocking_defaults_hidden_regardless_of_autoplay(self):
+        # Before any explicit user reveal the flag is absent; privacy must keep the
+        # video hidden even when auto-play is on. The predicate must not fall back to
+        # the auto-play setting (the old dead branch did).
+        window = type("FakeWindow", (), {})()
+        window.conf_privacy_mode = True
+        window.conf_auto_play = True
+
+        self.assertTrue(VideoSorter.is_privacy_blocking_video(window))
+
+    def _make_play_window(self):
+        window = type("FakeWindow", (), {"setWindowTitle": lambda self, title: setattr(self, "title", title)})()
+        window.file_list = FakePlayableList()
+        window.scan_timer = FakeTimer()
+        window.seek_safety_timer = FakeTimer()
+        window.is_waiting_for_seek = False
+        window.chk_random = FakeCheck(False)
+        window.chk_autoscan = FakeCheck(False)
+        window.conf_auto_play = True
+        window.conf_privacy_mode = True
+        window.playback_generation = 0
+        window.player_engine = FakePlaybackEngine()
+        window.video_view = FakeVideoView()
+        window.player = FakeLoadPlayer()
+        window.playback_rate = 1.0
+        window._last_media_failure_key = None
+        window._prepare_playback = lambda index: VideoSorter._prepare_playback(window, index)
+        window._resolve_start_pos = lambda item, specific_pos: VideoSorter._resolve_start_pos(window, item, specific_pos)
+        window._current_playlist_items = lambda: VideoSorter._current_playlist_items(window)
+        window._increment_playback_generation = lambda: VideoSorter._increment_playback_generation(window)
+        window._preload_direction_for_index = lambda index: VideoSorter._preload_direction_for_index(window, index)
+        return window
+
+    def test_play_video_resets_visible_playback_request(self):
+        # Programmatic activation must re-arm privacy so the next video stays hidden
+        # until the user explicitly asks to see it again.
+        window = self._make_play_window()
+        window._user_has_requested_visible_playback = True
+
+        VideoSorter.play_video(window, 1)
+
+        self.assertFalse(window._user_has_requested_visible_playback)
+
+    def test_toggle_play_marks_visible_playback_request_on_play(self):
+        class ToggleSource:
+            def isEmpty(self):
+                return False
+
+        class TogglePlayer:
+            def __init__(self):
+                self.play_count = 0
+
+            def playbackState(self):
+                return QMediaPlayer.PlaybackState.PausedState
+
+            def source(self):
+                return ToggleSource()
+
+            def play(self):
+                self.play_count += 1
+
+        window = type("FakeWindow", (), {})()
+        window.player = TogglePlayer()
+        window._apply_privacy_visibility = lambda is_playing: None
+        window.update_timer_state = lambda: None
+        window._reveal_active_playback = lambda: VideoSorter._reveal_active_playback(window)
+        window._user_has_requested_visible_playback = False
+
+        VideoSorter.toggle_play(window)
+
+        self.assertEqual(window.player.play_count, 1)
+        self.assertTrue(window._user_has_requested_visible_playback)
+
+    def test_on_video_clicked_marks_visible_playback_request(self):
+        class ClickPlayer:
+            def __init__(self):
+                self.position = None
+                self.play_count = 0
+
+            def duration(self):
+                return 10000
+
+            def setPosition(self, position):
+                self.position = position
+
+            def playbackState(self):
+                return QMediaPlayer.PlaybackState.PausedState
+
+            def play(self):
+                self.play_count += 1
+
+        window = type("FakeWindow", (), {})()
+        window.player = ClickPlayer()
+        window.seek_safety_timer = FakeTimer()
+        window.player_manager = FakePlayerManager(None)
+        window.chk_autoscan = FakeCheck(False)
+        window.scan_timer = FakeTimer()
+        window.is_waiting_for_seek = True
+        window._user_has_requested_visible_playback = False
+
+        VideoSorter.on_video_clicked(window, 0.5)
+
+        self.assertEqual(window.player.position, 5000)
+        self.assertTrue(window._user_has_requested_visible_playback)
+
+    def test_seek_to_thumbnail_marks_visible_playback_request(self):
+        class FakeWindow:
+            def __init__(self):
+                self.seek_calls = []
+                self._user_has_requested_visible_playback = False
+
+            def _execute_seek_and_play(self, timestamp):
+                self.seek_calls.append(timestamp)
+
+        window = FakeWindow()
+
+        VideoSorter.seek_to_thumbnail(window, 42000)
+
+        self.assertEqual(window.seek_calls, [42000])
+        self.assertTrue(window._user_has_requested_visible_playback)
+
+    def test_toggle_play_reveals_hidden_video_when_user_resumes_under_privacy(self):
+        # Autoplay-off + privacy leaves the active video hidden (opacity 0). Pressing
+        # play (Space) is an explicit reveal request, so the engine must actually be
+        # asked to reveal, and the shared predicate must now allow it.
+        class RevealSlot:
+            def __init__(self):
+                self.last_status = "loaded"
+                self.video_item = FakeVideoItem()
+
+        slot = RevealSlot()
+
+        class RevealEngine:
+            def __init__(self, guard):
+                self._guard = guard
+
+            def active_slot(self):
+                return slot
+
+            def reveal_if_allowed(self, active_slot, status, fallback_expired=False):
+                if self._guard():
+                    return False
+                active_slot.video_item.setOpacity(1.0)
+                return True
+
+        class ResumeSource:
+            def isEmpty(self):
+                return False
+
+        class ResumePlayer:
+            def playbackState(self):
+                return QMediaPlayer.PlaybackState.PausedState
+
+            def source(self):
+                return ResumeSource()
+
+            def play(self):
+                pass
+
+        window = type("FakeWindow", (), {})()
+        window.conf_privacy_mode = True
+        window._user_has_requested_visible_playback = False
+        window.player = ResumePlayer()
+        window.player_engine = RevealEngine(lambda: VideoSorter.is_privacy_blocking_video(window))
+        window._apply_privacy_visibility = lambda is_playing: None
+        window.update_timer_state = lambda: None
+        window._reveal_active_playback = lambda: VideoSorter._reveal_active_playback(window)
+
+        VideoSorter.toggle_play(window)
+
+        self.assertTrue(window._user_has_requested_visible_playback)
+        self.assertEqual(slot.video_item.opacity, 1.0)
+
 
 class PlayerPropertyRoutingTest(unittest.TestCase):
     def test_player_property_prefers_engine_active_player(self):

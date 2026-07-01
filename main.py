@@ -90,8 +90,11 @@ class VideoSorter(QMainWindow):
         self.target_start_pos: int = 0      # 재생 시작 지점 (ms)
         self.is_waiting_for_seek: bool = False 
         
-        self.last_played_path: Optional[str] = None 
-        self.playback_rate: float = 1.0 
+        self.last_played_path: Optional[str] = None
+        self.playback_rate: float = 1.0
+        # [프라이버시] 사용자가 명시적으로 '보기'를 요청했는지 여부. 새 재생 진입 시 False로
+        # 초기화되고, 스페이스/클릭/썸네일 탐색 등 사용자 조작으로만 True가 된다.
+        self._user_has_requested_visible_playback: bool = False
         self.last_main_row: int = 0         # 메인 목록 마지막 선택 행
         self.last_main_pos: int = 0         # 메인 목록 마지막 재생 위치
         self.last_main_path: Optional[str] = None 
@@ -197,11 +200,12 @@ class VideoSorter(QMainWindow):
             self.player_manager.set_active_index(slot.pool_index)
 
     def is_privacy_blocking_video(self) -> bool:
-        if not getattr(self, "conf_privacy_mode", False):
-            return False
-        if hasattr(self, "_user_has_requested_visible_playback"):
-            return not bool(self._user_has_requested_visible_playback)
-        return not bool(getattr(self, "conf_auto_play", False))
+        # [프라이버시] 프라이버시 모드에서는 사용자가 명시적으로 '보기'를 요청하기 전까지
+        # 영상을 숨긴다. 자동 재생 설정과는 무관하다.
+        return bool(
+            getattr(self, "conf_privacy_mode", False)
+            and not getattr(self, "_user_has_requested_visible_playback", False)
+        )
 
     def _increment_playback_generation(self) -> None:
         self.playback_generation = getattr(self, "playback_generation", 0) + 1
@@ -885,10 +889,20 @@ class VideoSorter(QMainWindow):
             else:
                 self.setWindowTitle("YDManager")
             
+    def _reveal_active_playback(self) -> None:
+        """사용자의 명시적 '보기' 요청 시 엔진에 현재 활성 슬롯의 영상 노출을 다시 요청한다.
+        실제 노출 여부는 공유 프라이버시 판단(is_privacy_blocking_video)이 결정한다."""
+        engine = getattr(self, "player_engine", None)
+        if engine is None:
+            return
+        active_slot = engine.active_slot()
+        if active_slot is not None:
+            engine.reveal_if_allowed(active_slot, active_slot.last_status, fallback_expired=True)
+
     # =========================================================================
     # 5. Playback Logic (재생 로직)
     # =========================================================================
-    
+
     def update_timer_state(self):
         """[통합 관리] 재생 상태와 옵션에 따라 타이머(오토스캔) 제어"""
         is_playing = self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
@@ -918,8 +932,13 @@ class VideoSorter(QMainWindow):
                     return
 
             self.player.play()
+            # [프라이버시] 사용자가 직접 재생을 눌렀으므로 영상 표시를 허용한다.
+            self._user_has_requested_visible_playback = True
             self._apply_privacy_visibility(True)
-            
+            # 이미 로드된 영상은 재생 상태 변화만으로는 다시 노출되지 않으므로,
+            # 명시적 재생 요청 시 엔진에 노출을 다시 요청한다.
+            self._reveal_active_playback()
+
         self.update_timer_state()
 
     def toggle_autoscan(self, checked):
@@ -944,6 +963,9 @@ class VideoSorter(QMainWindow):
         target_path, item_widget = self._prepare_playback(index)
         if not target_path:
             return
+
+        # [프라이버시] 프로그램에 의한 재생 진입은 사용자의 명시적 '보기' 요청을 초기화한다.
+        self._user_has_requested_visible_playback = False
 
         start_pos = self._resolve_start_pos(item_widget, specific_start_pos)
         self.target_start_pos = start_pos
@@ -1023,6 +1045,8 @@ class VideoSorter(QMainWindow):
             self.scan_timer.stop()
 
     def seek_to_thumbnail(self, timestamp_ms: int) -> None:
+        # [프라이버시] 썸네일로 특정 지점을 탐색하는 것은 명시적 '보기' 요청이다.
+        self._user_has_requested_visible_playback = True
         self._execute_seek_and_play(int(timestamp_ms))
 
     def _highlight_times_for_path(self, path: str | None) -> list[int]:
@@ -1555,6 +1579,9 @@ class VideoSorter(QMainWindow):
     def on_video_clicked(self, ratio):
         dur = self.player.duration()
         if dur <= 0: return
+
+        # [프라이버시] 영상 영역을 직접 클릭한 것은 명시적 '보기' 요청이다.
+        self._user_has_requested_visible_playback = True
 
         self.is_waiting_for_seek = False
         self.seek_safety_timer.stop()
