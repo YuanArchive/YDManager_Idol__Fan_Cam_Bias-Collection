@@ -256,12 +256,13 @@ LIST_WIDGET_STYLE_GLOBAL = f"""
         border: 1px solid {CurrentTheme.ACCENT_BLUE}; /* 강조색 테두리 */
     }}
 
-    /* 3. 아이템 스타일 (기존 유지하되 선택 색상 확인) */
+    /* 3. 아이템 스타일 */
     QListWidget#RoundList::item {{ 
-        height: 25px; 
-        padding-left: 0px; 
-        border-radius: 0px; 
-        margin-bottom: 2px;
+        height: 24px; 
+        padding: 0px 8px; 
+        border: none;
+        border-radius: 4px; 
+        margin: 2px 4px;
     }}
 
     QListWidget#RoundList::item:hover {{ 
@@ -370,12 +371,16 @@ LABEL_PLAYBACK_STYLE = f"""
     color: {CurrentTheme.ACCENT_GREEN};
     font-weight: bold;
     margin-top: 8px;
+    margin-left: 0px;
+    padding-left: 6px;
 """
 
 LABEL_INFO_STYLE = f"""
     color: {CurrentTheme.TEXT_SUB};
     font-weight: bold;
     margin-top: 0px;
+    margin-left: 0px;
+    padding-left: 6px;
 """
 
 

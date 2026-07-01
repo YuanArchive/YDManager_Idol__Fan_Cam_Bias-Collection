@@ -65,7 +65,8 @@ class PlayerManager:
                 
                 # 화면 생성 및 씬에 추가
                 item = QGraphicsVideoItem()
-                item.setSize(QSizeF(self.video_view.size()))
+                item.setPos(0, 0)
+                item.setSize(QSizeF(self.video_view.viewport().size()))
                 item.setZValue(0.0)
                 item.setOpacity(0.0) # 기본적으로 숨김
                 self.video_view.scene.addItem(item)
@@ -167,6 +168,7 @@ class PlayerManager:
     def resize_all(self, new_size):
         for mode in self.pools:
             for p_data in self.pools[mode]:
+                p_data['item'].setPos(0, 0)
                 p_data['item'].setSize(new_size)
 
     def stop_all_in_mode(self, mode):

@@ -5,8 +5,8 @@ import qtawesome as qta
 from .styles import Catppuccin  # Macchiato 변수 사용을 위해 추가
 from PyQt6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsTextItem, QGraphicsRectItem, 
                              QListWidget, QAbstractItemView, QMessageBox, QDialog, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QPushButton)
-from PyQt6.QtGui import QColor, QFont, QBrush, QPen, QPainter, QPaintEvent, QDrag, QPixmap, QPainterPath, QRegion, QIcon
+                             QLabel, QPushButton, QFrame)
+from PyQt6.QtGui import QColor, QFont, QBrush, QPen, QPainter, QPaintEvent, QDrag, QPixmap, QIcon
 from PyQt6.QtCore import pyqtSignal, Qt, QSizeF, QRectF, QTimer, QPoint, QPropertyAnimation, QEasingCurve, QSize
 from .styles import CurrentTheme as Theme
 from BlurWindow.blurWindow import GlobalBlur
@@ -39,43 +39,19 @@ class ProVideoView(QGraphicsView):
         self.viewport().update()
         
     def paintEvent(self, event):
-        # 1. 먼저 영상과 씬 아이템들을 평소처럼 그립니다.
         super().paintEvent(event)
-
-        # 2. 그 위에 투명하게 파낼 모서리 작업을 시작합니다.
-        painter = QPainter(self.viewport())
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        rect = QRectF(self.viewport().rect())
-        
-        # 전체 사각형 경로
-        outer_path = QPainterPath()
-        outer_path.addRect(rect.adjusted(-2, -2, 2, 2))
-        
-        
-        # 우리가 남기고 싶은 둥근 영역 경로
-        inner_path = QPainterPath()
-        inner_path.addRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 10, 10)
-        
-        # 잘라낼 모서리 부분만 추출 (전체 - 둥근 영역)
-        corner_mask = outer_path.subtracted(inner_path)
-        
-        # [핵심 수정] 색을 채우는 대신 'Clear' 모드로 해당 영역을 완전히 지웁니다.
-        # 이렇게 하면 뒤에 깔린 메인 윈도우의 블러(GlobalBlur)가 그대로 보입니다.
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.fillPath(corner_mask, QBrush(Qt.GlobalColor.transparent))
-        
-        # 3. Painter 모드를 다시 복구 (오버레이 및 프라이버시 화면용)
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         
         is_privacy = getattr(self, 'is_privacy_active', False)
         from PyQt6.QtMultimediaWidgets import QGraphicsVideoItem
         has_visible_video = any(isinstance(item, QGraphicsVideoItem) and item.isVisible() for item in self.scene.items())
 
         if is_privacy or not has_visible_video:
+            painter = QPainter(self.viewport())
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            rect = QRectF(self.viewport().rect())
+
             # 배경을 다시 테마 색상으로 채우고 안내 문구를 그립니다.
-            painter.fillPath(inner_path, QBrush(QColor(Theme.BASE)))
+            painter.fillRect(self.viewport().rect(), QBrush(QColor(Theme.BASE)))
             
             #icon_size = 80
             #icon = qta.icon('fa5s.file-video', color=Theme.OVERLAY)
@@ -87,21 +63,18 @@ class ProVideoView(QGraphicsView):
             painter.setFont(QFont(get_current_font_family(), 13, QFont.Weight.Bold))
             msg = "" if is_privacy else "Drag & Drop Video or Folder"
             painter.drawText(rect.adjusted(0, 40, 0, 0), Qt.AlignmentFlag.AlignCenter, msg)
-            
-        painter.end()
-            
-    def update_mask(self):
-        """플레이어의 뷰포트(영상이 그려지는 영역)를 직접 둥글게 깎아냅니다."""
-        path = QPainterPath()
-        # 곡률을 20px로 설정 (스크린샷 대비 시원한 느낌)
-        path.addRoundedRect(QRectF(self.viewport().rect()), 20, 20)
-        region = QRegion(path.toFillPolygon().toPolygon())
-        self.viewport().setMask(region)
+
+            painter.end()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus) 
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setLineWidth(0)
+        self.setMidLineWidth(0)
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setViewportMargins(0, 0, 0, 0)
         self.viewport().setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self.setStyleSheet("background: transparent; border: none;")
@@ -216,17 +189,17 @@ class ProVideoView(QGraphicsView):
 
         # 프로그레스 바
         self.progress_bg = QGraphicsRectItem()
-        self.progress_bg.setBrush(QBrush(QColor(Catppuccin.OVERLAY + "50")))
+        self.progress_bg.setBrush(QBrush(QColor(Catppuccin.OVERLAY + "70")))
         self.progress_bg.setPen(QPen(Qt.PenStyle.NoPen))
         self.scene.addItem(self.progress_bg)
-        self.progress_bg.setZValue(20)
+        self.progress_bg.setZValue(90)
         self.progress_bg.hide()  # [추가] 초기 실행 시 숨김
         
         self.progress_fill = QGraphicsRectItem()
-        self.progress_fill.setBrush(QBrush(QColor(Catppuccin.YELLOW)))
+        self.progress_fill.setBrush(QBrush(QColor(Catppuccin.YELLOW + "D0")))
         self.progress_fill.setPen(QPen(Qt.PenStyle.NoPen))
         self.scene.addItem(self.progress_fill)
-        self.progress_fill.setZValue(21)
+        self.progress_fill.setZValue(91)
         self.progress_fill.hide() # [추가] 초기 실행 시 숨김
         
         self.duration = 0
@@ -267,25 +240,26 @@ class ProVideoView(QGraphicsView):
 
     def update_progress_bar(self):
         # [수정] 뷰 자체의 크기를 기준으로 바를 그립니다.
-        width = self.width()
-        height = self.height()
+        width = self.viewport().width()
+        height = self.viewport().height()
         
-        # [수정] scale 값은 이제 1.0으로 고정합니다 (fitInView를 안 쓰므로)
-        bar_h = 8.0 
+        bar_h = 7.0
+        bottom_inset = 6.0
+        bar_y = max(0.0, height - bar_h - bottom_inset)
         
-        self.progress_bg.setRect(0, height - bar_h, width, bar_h)
+        self.progress_bg.setRect(0, bar_y, width, bar_h)
         
         if self.duration > 0:
-            ratio = self.position / self.duration
+            ratio = max(0.0, min(1.0, self.position / self.duration))
             fill_width = width * ratio
-            self.progress_fill.setRect(0, height - bar_h, fill_width, bar_h)
+            self.progress_fill.setRect(0, bar_y, fill_width, bar_h)
         else:
-            self.progress_fill.setRect(0, height - bar_h, 0, bar_h)
+            self.progress_fill.setRect(0, bar_y, 0, bar_h)
 
     def update_layout_items(self):
         # [핵심 수정] 뷰의 크기에 맞춰 씬(Scene)의 크기를 1:1로 맞춥니다.
-        w = self.width()
-        h = self.height()
+        w = self.viewport().width()
+        h = self.viewport().height()
         
         self.scene.setSceneRect(0, 0, w, h)
              
@@ -301,9 +275,11 @@ class ProVideoView(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         from PyQt6.QtMultimediaWidgets import QGraphicsVideoItem
+        video_size = QSizeF(self.viewport().size())
         for item in self.scene.items():
             if isinstance(item, QGraphicsVideoItem):
-                item.setSize(QSizeF(self.size()))
+                item.setPos(0, 0)
+                item.setSize(video_size)
         self.update_layout_items()
 
     def _handle_seek(self, event):

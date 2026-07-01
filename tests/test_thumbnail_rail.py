@@ -80,6 +80,25 @@ class ThumbnailPreviewRailWidgetTest(unittest.TestCase):
         self.assertEqual(preview_rect.height(), cell_rect.height() * 2)
         self.assertEqual(self.widget.size(), original_size)
 
+    def test_vertical_cells_fill_height_without_bottom_remainder(self):
+        self.widget = ThumbnailPreviewRailWidget()
+        self.widget.resize(134, 887)
+
+        first_rect = self.widget.cell_rect(0)
+        last_rect = self.widget.cell_rect(11)
+
+        self.assertEqual(first_rect.top(), self.widget.grid_margin)
+        self.assertEqual(last_rect.bottom(), self.widget.height() - self.widget.grid_margin - 1)
+
+    def test_vertical_width_for_height_preserves_twelve_sixteen_by_nine_cells(self):
+        height = 887
+        width = ThumbnailPreviewRailWidget.width_for_height(height)
+        usable_height = height - ThumbnailPreviewRailWidget.grid_margin * 2
+        usable_height -= ThumbnailPreviewRailWidget.grid_gap * 11
+        cell_height = usable_height / 12
+
+        self.assertEqual(width, round(cell_height * 16 / 9) + ThumbnailPreviewRailWidget.grid_margin * 2)
+
     def test_privacy_hidden_clears_hover_preview(self):
         self.widget = ThumbnailPreviewRailWidget()
         self.widget.resize(120, 480)

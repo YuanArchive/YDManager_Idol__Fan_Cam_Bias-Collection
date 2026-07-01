@@ -16,6 +16,11 @@ class ThumbnailSamplingTest(unittest.TestCase):
         self.assertTrue(all(0 <= value <= 5000 for value in result))
         self.assertEqual(result, sorted(result))
 
+    def test_sample_timestamps_stays_away_from_unreliable_tail_frames(self):
+        result = sample_timestamps(duration_ms=1500)
+
+        self.assertLessEqual(result[-1], 1350)
+
     def test_sample_timestamps_always_returns_twelve_for_long_video(self):
         result = sample_timestamps(duration_ms=30 * 60 * 1000)
 

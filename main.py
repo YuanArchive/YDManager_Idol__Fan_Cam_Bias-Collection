@@ -374,9 +374,10 @@ class VideoSorter(QMainWindow):
     def apply_16_9_ratio(self) -> None:
         """윈도우 크기를 16:9 비율에 맞춰 조정합니다."""
         left_panel_w = 230
-        target_video_w = 1305
+        target_video_w = 1280
         target_video_h = 720
-        thumbnail_rail_w = 110
+        thumbnail_rail_w = self.thumbnail_rail.width_for_height(target_video_h)
+        self.thumbnail_rail.setFixedWidth(thumbnail_rail_w)
         target_right_w = target_video_w + thumbnail_rail_w
         extra_w, extra_h = 40, 80
         
@@ -390,7 +391,18 @@ class VideoSorter(QMainWindow):
         
         self.splitter.setSizes([left_panel_w, target_right_w])
         self.splitter.setStretchFactor(0, 0)
-        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(1, 1) 
+
+    def _sync_thumbnail_rail_width(self) -> None:
+        if not hasattr(self, "thumbnail_rail") or not hasattr(self, "video_view"):
+            return
+        orientation = getattr(self.thumbnail_rail.orientation, "value", self.thumbnail_rail.orientation)
+        if orientation != "vertical":
+            return
+        video_height = self.video_view.viewport().height()
+        target_width = self.thumbnail_rail.width_for_height(video_height)
+        if self.thumbnail_rail.width() != target_width:
+            self.thumbnail_rail.setFixedWidth(target_width)
         
     def is_system_dark_mode(self):
         """윈도우 레지스트리를 읽어 현재 시스템이 다크 모드인지 확인합니다."""
@@ -426,19 +438,34 @@ class VideoSorter(QMainWindow):
     def closeEvent(self, event) -> None:
         """애플리케이션 종료 시 자원 정리 시퀀스"""
         self.scan_timer.stop()
-        
+
         # 1. 인덱싱 스레드 안전하게 종료 (FileManager 위임)
         if hasattr(self, 'file_manager'):
-            self.file_manager.stop_indexing()
+            if self.file_manager.stop_indexing() is False:
+                # 느린/네트워크 경로에서 스캔이 물려 wait()가 타임아웃된 경우,
+                # 실행 중인 QThread를 그대로 파괴하면 'QThread: Destroyed while
+                # thread is still running' 크래시가 발생하므로 최후의 수단으로 강제 종료.
+                indexer = getattr(self.file_manager, 'indexer_thread', None)
+                if indexer is not None:
+                    try:
+                        if indexer.isRunning():
+                            indexer.terminate()
+                            indexer.wait(2000)
+                    except RuntimeError:
+                        pass
 
-        # 2. 모든 플레이어 리소스 완전 해제 (파일 락 방지)
+        # 2. 썸네일 워커(QThread + ffmpeg) 정지 및 조인 (파일 락/좀비 프로세스 방지)
+        if hasattr(self, 'thumbnail_manager'):
+            self.thumbnail_manager.shutdown()
+
+        # 3. 모든 플레이어 리소스 완전 해제 (파일 락 방지)
         if hasattr(self, 'player_manager'):
             self.player_manager.cleanup()
-            
-        # 3. 설정값 강제 저장 (휴지통 데이터 등)
+
+        # 4. 설정값 강제 저장 (휴지통 데이터 등)
         if hasattr(self, 'file_manager'):
             self.file_manager.save_trash()
-            
+
         event.accept()
 
     def resizeEvent(self, event) -> None:
@@ -455,7 +482,8 @@ class VideoSorter(QMainWindow):
 
     def _delayed_resize(self) -> None:
         if hasattr(self, 'player_manager') and hasattr(self, 'video_view'):
-            new_size = QSizeF(self.video_view.size())
+            self._sync_thumbnail_rail_width()
+            new_size = QSizeF(self.video_view.viewport().size())
             self.player_manager.resize_all(new_size)
 
     # =========================================================================
@@ -692,6 +720,8 @@ class VideoSorter(QMainWindow):
                 self.file_list.addItem(list_item) 
         finally:
             self.file_list.setUpdatesEnabled(True)
+
+        VideoSorter._queue_background_thumbnail_generation(self, current_list)
 
         # [버그 수정 코드 시작] -----------------------------------------------------
         # 화면이 'Main' 모드로 돌아왔을 때, 현재 보고 있는 폴더를 폴더 리스트에서 찾아 다시 선택해줍니다.
@@ -930,6 +960,9 @@ class VideoSorter(QMainWindow):
             self.setWindowTitle(f"재생: {os.path.basename(target_path)}")
 
         result = self.player_engine.activate(target_path, start_pos, generation, autoplay)
+        active_player = self.player_engine.active_player() if hasattr(self.player_engine, "active_player") else None
+        duration_hint = active_player.duration() if active_player is not None and active_player.duration() > 0 else None
+        VideoSorter._sync_thumbnail_rail(self, target_path, duration_hint)
         self.player.setPlaybackRate(self.playback_rate)
         self.is_waiting_for_seek = result.waiting_for_media
         preload_direction = self._preload_direction_for_index(index)
@@ -1032,12 +1065,39 @@ class VideoSorter(QMainWindow):
         manager.request_timeline(path, duration_ms=duration_ms, priority="active")
         manager.start_next_job()
 
+    def _queue_background_thumbnail_generation(self, current_list: list[dict]) -> None:
+        manager = getattr(self, "thumbnail_manager", None)
+        if manager is None:
+            return
+
+        for item in current_list:
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path")
+            if not path:
+                continue
+            duration_ms = item.get("duration_ms", item.get("duration"))
+            try:
+                duration_ms = int(duration_ms) if duration_ms is not None else None
+            except (TypeError, ValueError):
+                duration_ms = None
+            manager.request_timeline(path, duration_ms=duration_ms, priority="background")
+
+        manager.start_next_job()
+
     def _on_thumbnail_timeline_ready(self, path: str, cells: list[ThumbnailCell]) -> None:
         if not VideoSorter.is_active_watch_path(self, path):
             return
-        if hasattr(self, "thumbnail_rail"):
-            self.thumbnail_rail.set_cells(cells)
-            self.thumbnail_rail.set_highlights(VideoSorter._highlight_times_for_path(self, path))
+        if not hasattr(self, "thumbnail_rail"):
+            return
+        # cached_cells() returns [] when the manifest/record is invalid or a
+        # cache image is missing on disk. set_cells() requires exactly 12 cells,
+        # so passing an empty list here would raise inside a Qt slot (a fatal
+        # abort in PyQt6). Ignore incomplete timelines and keep current cells.
+        if not cells or len(cells) != self.thumbnail_rail.cell_count:
+            return
+        self.thumbnail_rail.set_cells(cells)
+        self.thumbnail_rail.set_highlights(VideoSorter._highlight_times_for_path(self, path))
 
     def _thumbnail_random_start_candidate(
         self,

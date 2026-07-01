@@ -83,6 +83,92 @@ class ThumbnailTimelineManagerTest(unittest.TestCase):
 
         self.assertEqual([job.path for job in manager.pending_jobs], [path])
 
+    def test_default_manager_uses_four_parallel_workers(self):
+        manager = ThumbnailTimelineManager()
+
+        self.assertEqual(manager.max_workers, 4)
+
+    def test_background_queue_keeps_all_requested_uncached_paths(self):
+        manager = ThumbnailTimelineManager()
+        paths = []
+        for index in range(20):
+            path = os.path.join(self.temp_dir.name, f"video_{index:02d}.mp4")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(f"video {index}")
+            paths.append(path)
+
+        for path in paths:
+            manager.request_timeline(path, duration_ms=None, priority="background")
+
+        self.assertEqual([job.path for job in manager.pending_jobs], paths)
+
+    def test_start_next_job_fills_available_worker_slots(self):
+        manager = ThumbnailTimelineManager()
+        paths = []
+        started = []
+
+        class FakeSignal:
+            def connect(self, callback):
+                self.callback = callback
+
+        class FakeWorker:
+            def __init__(self, job_path, timestamps_ms, output_dir):
+                self.path = job_path
+                self.timestamps_ms = timestamps_ms
+                self.output_dir = output_dir
+                self.finished_path = FakeSignal()
+                self.failed_path = FakeSignal()
+
+            def set_duration_ms(self, duration_ms):
+                self.duration_ms = duration_ms
+
+            def start(self):
+                started.append(self.path)
+
+        for index in range(5):
+            path = os.path.join(self.temp_dir.name, f"parallel_{index}.mp4")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(f"video {index}")
+            paths.append(path)
+            manager.request_timeline(path, duration_ms=120000, priority="background")
+
+        first_worker = manager.start_next_job(worker_factory=FakeWorker)
+
+        self.assertIsNotNone(first_worker)
+        self.assertEqual(len(manager.active_workers), 4)
+        self.assertEqual(started, paths[:4])
+        self.assertEqual([job.path for job in manager.pending_jobs], paths[4:])
+
+    def test_request_timeline_skips_cached_pending_and_active_duplicates(self):
+        path = self.make_video()
+        manager = ThumbnailTimelineManager(max_workers=1)
+
+        class FakeSignal:
+            def connect(self, callback):
+                self.callback = callback
+
+        class FakeWorker:
+            def __init__(self, job_path, timestamps_ms, output_dir):
+                self.path = job_path
+                self.finished_path = FakeSignal()
+                self.failed_path = FakeSignal()
+
+            def set_duration_ms(self, duration_ms):
+                self.duration_ms = duration_ms
+
+            def start(self):
+                pass
+
+        manager.request_timeline(path, duration_ms=120000, priority="background")
+        manager.request_timeline(path, duration_ms=120000, priority="background")
+        self.assertEqual(len(manager.pending_jobs), 1)
+
+        manager.start_next_job(worker_factory=FakeWorker)
+        manager.request_timeline(path, duration_ms=120000, priority="active")
+
+        self.assertEqual(len(manager.pending_jobs), 0)
+        self.assertIn(manager._path_key(path), manager.active_workers)
+
     def test_best_random_start_uses_cached_quality_scores(self):
         path = self.make_video()
         os.makedirs(os.path.join(self.cache_dir, "abc"), exist_ok=True)
@@ -166,6 +252,141 @@ class ThumbnailTimelineManagerTest(unittest.TestCase):
         self.assertEqual(len(captured["timestamps_ms"]), 12)
         self.assertTrue(captured["output_dir"].startswith(self.cache_dir))
         self.assertNotIn("started", captured)
+
+    def test_shutdown_cancels_joins_and_clears_workers(self):
+        manager = ThumbnailTimelineManager()
+        events = []
+
+        class FakeSignal:
+            def __init__(self):
+                self.callbacks = []
+
+            def connect(self, callback):
+                self.callbacks.append(callback)
+
+            def disconnect(self):
+                self.callbacks.clear()
+
+            def emit(self, *args):
+                for callback in list(self.callbacks):
+                    callback(*args)
+
+        class FakeThreadWorker:
+            def __init__(self, job_path, timestamps_ms, output_dir):
+                self.path = job_path
+                self.finished_path = FakeSignal()
+                self.failed_path = FakeSignal()
+                self.finished = FakeSignal()
+                self._done = False
+
+            def set_duration_ms(self, duration_ms):
+                pass
+
+            def start(self):
+                pass
+
+            def cancel(self):
+                events.append(("cancel", self.path))
+                self._done = True
+
+            def isFinished(self):
+                return self._done
+
+            def wait(self, ms=0):
+                events.append(("wait", self.path))
+                return self._done
+
+            def terminate(self):
+                events.append(("terminate", self.path))
+                self._done = True
+
+            def deleteLater(self):
+                events.append(("delete", self.path))
+
+        paths = []
+        for index in range(2):
+            path = os.path.join(self.temp_dir.name, f"shutdown_{index}.mp4")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write("v")
+            paths.append(path)
+            manager.request_timeline(path, duration_ms=120000, priority="background")
+        manager.start_next_job(worker_factory=FakeThreadWorker)
+        self.assertEqual(len(manager.active_workers), 2)
+
+        manager.shutdown(wait_ms=10)
+
+        self.assertTrue(manager._shutting_down)
+        self.assertEqual(len(manager.active_workers), 0)
+        self.assertEqual(manager.pending_jobs, [])
+        self.assertEqual(sum(1 for event in events if event[0] == "cancel"), 2)
+        self.assertEqual(sum(1 for event in events if event[0] == "wait"), 2)
+
+        # After shutdown, no new worker may be launched.
+        manager.request_timeline(paths[0], duration_ms=120000, priority="active")
+        self.assertIsNone(manager.start_next_job(worker_factory=FakeThreadWorker))
+        self.assertEqual(len(manager.active_workers), 0)
+
+    def test_finished_qthread_worker_is_held_until_thread_finishes(self):
+        path = self.make_video()
+        manager = ThumbnailTimelineManager()
+        events = []
+
+        class FakeSignal:
+            def __init__(self):
+                self.callbacks = []
+
+            def connect(self, callback):
+                self.callbacks.append(callback)
+
+            def emit(self, *args):
+                for callback in list(self.callbacks):
+                    callback(*args)
+
+        class FakeThreadWorker:
+            def __init__(self, job_path, timestamps_ms, output_dir):
+                self.path = job_path
+                self.output_dir = output_dir
+                self.finished_path = FakeSignal()
+                self.failed_path = FakeSignal()
+                self.finished = FakeSignal()
+                self.resolved_duration_ms = 120000
+                self.resolved_timestamps_ms = [i * 10000 for i in range(12)]
+
+            def set_duration_ms(self, duration_ms):
+                pass
+
+            def start(self):
+                pass
+
+            def isFinished(self):
+                return True
+
+            def wait(self, ms=0):
+                return True
+
+            def deleteLater(self):
+                events.append("delete")
+
+        manager.request_timeline(path, duration_ms=120000, priority="active")
+        worker = manager.start_next_job(worker_factory=FakeThreadWorker, autostart=False)
+        os.makedirs(worker.output_dir, exist_ok=True)
+        files = []
+        for index in range(12):
+            name = f"{index:03d}.jpg"
+            with open(os.path.join(worker.output_dir, name), "wb") as file:
+                file.write(b"jpg")
+            files.append(name)
+
+        worker.finished_path.emit(path, files)
+
+        # The QThread reference is held (not dropped) until finished() fires.
+        self.assertIn(worker, manager._retiring)
+        self.assertNotIn(manager._path_key(path), manager.active_workers)
+
+        worker.finished.emit()
+
+        self.assertNotIn(worker, manager._retiring)
+        self.assertIn("delete", events)
 
     def test_finished_worker_records_manifest_and_clears_active_worker(self):
         path = self.make_video()

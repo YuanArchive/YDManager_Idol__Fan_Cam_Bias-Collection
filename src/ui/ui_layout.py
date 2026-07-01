@@ -167,6 +167,7 @@ def init_ui(window):
     window.folder_list_widget.setAcceptDrops(True)
     window.folder_list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
     window.folder_list_widget.setDropIndicatorShown(False)
+    window.folder_list_widget.setUniformItemSizes(True)
 
     sp_folder = window.folder_list_widget.sizePolicy()
     sp_folder.setRetainSizeWhenHidden(True)
@@ -177,6 +178,7 @@ def init_ui(window):
     window.file_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     window.file_list.setFrameShape(QFrame.Shape.NoFrame)
     window.file_list.setObjectName("RoundList")
+    window.file_list.setUniformItemSizes(True)
     
     sp_file = window.file_list.sizePolicy()
     sp_file.setRetainSizeWhenHidden(True)
@@ -263,7 +265,7 @@ def init_ui(window):
 
     window.video_view = ProVideoView()
     window.thumbnail_rail = ThumbnailPreviewRailWidget()
-    window.thumbnail_rail.setFixedWidth(105)
+    window.thumbnail_rail.setFixedWidth(ThumbnailPreviewRailWidget.width_for_height(720))
     
     sp_video = window.video_view.sizePolicy()
     sp_video.setRetainSizeWhenHidden(True)

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -8,6 +9,9 @@ from PyQt6.QtMultimedia import QMediaPlayer
 from main import VideoSorter
 from src.managers.player_engine import SlotState
 from src.ui.thumbnail_rail import ThumbnailCell
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeTimer:
@@ -375,6 +379,60 @@ class PlayerEngineIntegrationTest(unittest.TestCase):
                 )
             ],
         )
+
+    def test_play_video_syncs_thumbnail_rail_immediately_for_target_path(self):
+        cells = [
+            ThumbnailCell(index=i, timestamp_ms=i * 1000, image_path=None, state="ready")
+            for i in range(12)
+        ]
+
+        class FakeManager:
+            def __init__(self):
+                self.cached_path = None
+
+            def cached_cells(self, path):
+                self.cached_path = path
+                return cells if path == "C:/videos/b.mp4" else []
+
+        class FakeRail:
+            def __init__(self):
+                self.cells = None
+                self.highlights = None
+
+            def set_cells(self, value):
+                self.cells = value
+
+            def set_highlights(self, value):
+                self.highlights = value
+
+        window = type("FakeWindow", (), {"setWindowTitle": lambda self, title: setattr(self, "title", title)})()
+        window.file_list = FakePlayableList()
+        window.scan_timer = FakeTimer()
+        window.seek_safety_timer = FakeTimer()
+        window.is_waiting_for_seek = False
+        window.chk_random = FakeCheck(False)
+        window.chk_autoscan = FakeCheck(False)
+        window.conf_auto_play = True
+        window.conf_privacy_mode = False
+        window.playback_generation = 5
+        window.player_engine = FakePlaybackEngine()
+        window.video_view = FakeVideoView()
+        window.player = FakeLoadPlayer()
+        window.playback_rate = 1.0
+        window._last_media_failure_key = None
+        window.thumbnail_manager = FakeManager()
+        window.thumbnail_rail = FakeRail()
+        window._prepare_playback = lambda index: VideoSorter._prepare_playback(window, index)
+        window._resolve_start_pos = lambda item, specific_pos: VideoSorter._resolve_start_pos(window, item, specific_pos)
+        window._current_playlist_items = lambda: VideoSorter._current_playlist_items(window)
+        window._increment_playback_generation = lambda: VideoSorter._increment_playback_generation(window)
+        window._preload_direction_for_index = lambda index: VideoSorter._preload_direction_for_index(window, index)
+
+        VideoSorter.play_video(window, 1)
+
+        self.assertEqual(window.thumbnail_manager.cached_path, "C:/videos/b.mp4")
+        self.assertEqual(window.thumbnail_rail.cells, cells)
+        self.assertEqual(window.thumbnail_rail.highlights, [])
 
     def test_play_video_uses_balanced_preload_until_direction_streak_repeats(self):
         window = self._make_direction_window()
@@ -803,6 +861,103 @@ class ThumbnailPreviewCoordinatorTest(unittest.TestCase):
         self.assertTrue(all(cell.state == "loading" for cell in window.thumbnail_rail.cells))
         self.assertEqual(window.thumbnail_manager.request, ("C:/videos/a.mp4", 120000, "active"))
         self.assertTrue(window.thumbnail_manager.started)
+
+    def test_queue_background_thumbnail_generation_requests_all_visible_paths(self):
+        class FakeManager:
+            def __init__(self):
+                self.requests = []
+                self.started = False
+
+            def request_timeline(self, path, duration_ms=None, priority="active"):
+                self.requests.append((path, duration_ms, priority))
+
+            def start_next_job(self):
+                self.started = True
+
+        window = type("FakeWindow", (), {})()
+        window.thumbnail_manager = FakeManager()
+        current_list = [
+            {"path": "C:/videos/a.mp4"},
+            {"path": "C:/videos/b.mp4", "duration_ms": 5000},
+            {"text": "broken"},
+        ]
+
+        VideoSorter._queue_background_thumbnail_generation(window, current_list)
+
+        self.assertEqual(
+            window.thumbnail_manager.requests,
+            [
+                ("C:/videos/a.mp4", None, "background"),
+                ("C:/videos/b.mp4", 5000, "background"),
+            ],
+        )
+        self.assertTrue(window.thumbnail_manager.started)
+
+    def test_update_ui_mode_queues_background_thumbnails_for_current_list(self):
+        source = (ROOT / "main.py").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "VideoSorter._queue_background_thumbnail_generation(self, current_list)",
+            source,
+        )
+
+
+class ThumbnailTimelineReadyGuardTest(unittest.TestCase):
+    def _make_window(self):
+        class FakeRail:
+            def __init__(self):
+                self.cell_count = 12
+                self.cells = None
+                self.highlights = None
+
+            def set_cells(self, value):
+                self.cells = value
+
+            def set_highlights(self, value):
+                self.highlights = value
+
+        class FakeSession:
+            path = "C:/videos/a.mp4"
+
+        class FakeEngine:
+            def active_session(self):
+                return FakeSession()
+
+        window = type("FakeWindow", (), {})()
+        window.thumbnail_rail = FakeRail()
+        window.player_engine = FakeEngine()
+        window.file_manager = None
+        return window
+
+    def test_timeline_ready_ignores_empty_cells(self):
+        window = self._make_window()
+
+        VideoSorter._on_thumbnail_timeline_ready(window, "C:/videos/a.mp4", [])
+
+        self.assertIsNone(window.thumbnail_rail.cells)
+
+    def test_timeline_ready_ignores_wrong_cell_count(self):
+        window = self._make_window()
+        cells = [
+            ThumbnailCell(index=i, timestamp_ms=i * 1000, image_path=None, state="ready")
+            for i in range(5)
+        ]
+
+        VideoSorter._on_thumbnail_timeline_ready(window, "C:/videos/a.mp4", cells)
+
+        self.assertIsNone(window.thumbnail_rail.cells)
+
+    def test_timeline_ready_sets_full_twelve_cells(self):
+        window = self._make_window()
+        cells = [
+            ThumbnailCell(index=i, timestamp_ms=i * 1000, image_path=None, state="ready")
+            for i in range(12)
+        ]
+
+        VideoSorter._on_thumbnail_timeline_ready(window, "C:/videos/a.mp4", cells)
+
+        self.assertEqual(window.thumbnail_rail.cells, cells)
+        self.assertEqual(window.thumbnail_rail.highlights, [])
 
 
 class FakeStatusEngine:

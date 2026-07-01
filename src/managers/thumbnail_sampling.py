@@ -13,7 +13,7 @@ def sample_timestamps(duration_ms: int | None, count: int = THUMBNAIL_CELL_COUNT
         return [0 for _ in range(count)]
 
     safe_start = int(duration_ms * 0.05)
-    safe_end = int(duration_ms * 0.95)
+    safe_end = int(duration_ms * 0.90)
     if safe_end <= safe_start:
         safe_start = 0
         safe_end = max(0, duration_ms)

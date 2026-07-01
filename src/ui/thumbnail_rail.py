@@ -27,6 +27,8 @@ class ThumbnailCell:
 
 class ThumbnailPreviewRailWidget(QWidget):
     thumbnail_clicked = pyqtSignal(int)
+    grid_margin = 4
+    grid_gap = 3
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,7 +46,20 @@ class ThumbnailPreviewRailWidget(QWidget):
     def sizeHint(self) -> QSize:
         if self.orientation == PreviewOrientation.HORIZONTAL:
             return QSize(720, 70)
-        return QSize(105, 420)
+        return QSize(self.width_for_height(720), 720)
+
+    @classmethod
+    def width_for_height(cls, height: int) -> int:
+        usable_height = max(1, int(height) - cls.grid_margin * 2)
+        usable_height -= cls.grid_gap * (12 - 1)
+        cell_height = max(1.0, usable_height / 12)
+        return round(cell_height * 16 / 9) + cls.grid_margin * 2
+
+    def _distributed_segment(self, index: int, total: int) -> tuple[int, int]:
+        available = max(1, total - self.grid_margin * 2 - self.grid_gap * (self.cell_count - 1))
+        start = self.grid_margin + round(index * available / self.cell_count) + index * self.grid_gap
+        end = self.grid_margin + round((index + 1) * available / self.cell_count) + index * self.grid_gap
+        return start, max(1, end - start)
 
     def set_orientation(self, orientation: PreviewOrientation | str) -> None:
         self.orientation = PreviewOrientation(orientation)
@@ -71,18 +86,18 @@ class ThumbnailPreviewRailWidget(QWidget):
         if not 0 <= index < self.cell_count:
             return QRect()
 
-        margin = 4
-        gap = 3
         if self.orientation == PreviewOrientation.HORIZONTAL:
-            available = max(1, self.width() - margin * 2 - gap * (self.cell_count - 1))
-            cell_w = max(1, available // self.cell_count)
-            cell_h = max(1, self.height() - margin * 2)
-            return QRect(margin + index * (cell_w + gap), margin, cell_w, cell_h)
+            x, cell_w = self._distributed_segment(index, self.width())
+            target_h = max(1, round(cell_w * 9 / 16))
+            cell_h = min(max(1, self.height() - self.grid_margin * 2), target_h)
+            y = max(self.grid_margin, (self.height() - cell_h) // 2)
+            return QRect(x, y, cell_w, cell_h)
 
-        available = max(1, self.height() - margin * 2 - gap * (self.cell_count - 1))
-        cell_w = max(1, self.width() - margin * 2)
-        cell_h = max(1, available // self.cell_count)
-        return QRect(margin, margin + index * (cell_h + gap), cell_w, cell_h)
+        y, cell_h = self._distributed_segment(index, self.height())
+        target_w = max(1, round(cell_h * 16 / 9))
+        cell_w = min(max(1, self.width() - self.grid_margin * 2), target_w)
+        x = max(self.grid_margin, (self.width() - cell_w) // 2)
+        return QRect(x, y, cell_w, cell_h)
 
     def _cell_index_at(self, pos: QPoint) -> int | None:
         for index in range(self.cell_count):
@@ -154,7 +169,7 @@ class ThumbnailPreviewRailWidget(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor(20, 24, 32, 120))
+        painter.fillRect(self.rect(), QColor(20, 24, 32, 70))
 
         for index in range(self.cell_count):
             cell = self.cells[index] if index < len(self.cells) else None
@@ -171,7 +186,7 @@ class ThumbnailPreviewRailWidget(QWidget):
 
         painter.save()
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(35, 42, 55, 220))
+        painter.setBrush(QColor(35, 42, 55, 190))
         painter.drawRoundedRect(rect, 4, 4)
 
         if not self.privacy_hidden and cell and cell.image_path and os.path.exists(cell.image_path):
